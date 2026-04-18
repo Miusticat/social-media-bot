@@ -1,0 +1,17 @@
+{
+  "name": "autoexotic-bot",
+  "version": "1.0.0",
+  "description": "Bot de Discord para control de servicio y anuncios de AutoExotic",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "test": "echo \"No hay pruebas configuradas\" && exit 0"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "discord.js": "^14.26.3",
+    "dotenv": "^16.4.5"
+  }
+}
