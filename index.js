@@ -121,8 +121,6 @@ async function iniciarServicio({ user, member, channel }) {
     .setThumbnail(user.displayAvatarURL())
     .setTimestamp();
 
-  await channel.send({ embeds: [embedEntrada] });
-
   const embedLogEntrada = new EmbedBuilder()
     .setColor(0x57F287)
     .setTitle('Registro de horas - Entrada')
@@ -134,7 +132,7 @@ async function iniciarServicio({ user, member, channel }) {
     .setTimestamp();
 
   await enviarRegistro(embedLogEntrada);
-  return { ok: true, mensaje: 'Entrada registrada correctamente.' };
+  return { ok: true, mensaje: 'Entrada registrada correctamente.', embed: embedEntrada };
 }
 
 async function finalizarServicio({ user, member, channel }) {
@@ -204,7 +202,11 @@ client.on('interactionCreate', async (interaction) => {
         member: interaction.member,
         channel: interaction.channel
       });
-      await interaction.reply({ content: resultado.mensaje, ephemeral: true });
+      await interaction.reply({
+        content: resultado.mensaje,
+        embeds: resultado.embed ? [resultado.embed] : [],
+        ephemeral: true
+      });
       return;
     }
 
