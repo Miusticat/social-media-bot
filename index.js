@@ -1,326 +1,197 @@
 require('dotenv').config();
-const {
-  Client,
-  GatewayIntentBits,
-  EmbedBuilder,
-  PermissionFlagsBits,
-  ChannelType,
-  ActionRowBuilder,
-  ButtonBuilder,
-  ButtonStyle
-} = require('discord.js');
-
-const client = new Client({
-  intents: [
-    GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent,
-    GatewayIntentBits.GuildMembers
-  ]
-});
+const fs = require('fs/promises');
+const path = require('path');
+const { Client, GatewayIntentBits, EmbedBuilder, ChannelType } = require('discord.js');
 
 const TOKEN = process.env.DISCORD_TOKEN;
-const ID_CANAL_SERVICIO = process.env.SERVICE_CHANNEL_ID || '1483893982734843915';
-const ID_CANAL_REGISTRO = process.env.LOG_CHANNEL_ID || '1465430858222666022';
-const PREFIJO = process.env.PREFIX || '!';
+const INSTAGRAM_USERNAME = process.env.INSTAGRAM_USERNAME || 'gtaworld_es_oficial';
+const DISCORD_CHANNEL_ID = process.env.DISCORD_CHANNEL_ID || '1455996281272012932';
+const CHECK_INTERVAL_MINUTES = Number(process.env.CHECK_INTERVAL_MINUTES || 10);
+const POST_ON_STARTUP = String(process.env.POST_ON_STARTUP || 'false').toLowerCase() === 'true';
+const STATE_FILE = path.resolve(process.env.STATE_FILE || '.ig-state.json');
 
 if (!TOKEN) {
-  console.error('Falta la variable de entorno: DISCORD_TOKEN');
+  console.error('Falta la variable de entorno DISCORD_TOKEN.');
   process.exit(1);
 }
 
-const turnos = new Map();
-const BOTON_ENTRAR = 'servicio_entrar';
-const BOTON_SALIR = 'servicio_salir';
+const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
-function crearFilaBotonesServicio() {
-  return new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
-      .setCustomId(BOTON_ENTRAR)
-      .setLabel('Entrar de servicio')
-      .setStyle(ButtonStyle.Success),
-    new ButtonBuilder()
-      .setCustomId(BOTON_SALIR)
-      .setLabel('Salir de servicio')
-      .setStyle(ButtonStyle.Danger)
-  );
+let lastPublishedPostId = null;
+
+async function loadState() {
+  try {
+    const raw = await fs.readFile(STATE_FILE, 'utf-8');
+    const parsed = JSON.parse(raw);
+    lastPublishedPostId = parsed.lastPublishedPostId || null;
+  } catch {
+    lastPublishedPostId = null;
+  }
 }
 
-function formatoHora(fecha) {
-  return fecha.toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' });
+async function saveState() {
+  const payload = { lastPublishedPostId };
+  await fs.writeFile(STATE_FILE, JSON.stringify(payload, null, 2), 'utf-8');
 }
 
-function formatoFecha(fecha) {
-  return fecha.toLocaleDateString('es-CO');
+function normalizePost(node) {
+  if (!node) return null;
+
+  const captionEdge = node.edge_media_to_caption?.edges?.[0]?.node?.text || '';
+  return {
+    id: String(node.id || ''),
+    shortcode: node.shortcode,
+    caption: captionEdge,
+    takenAt: node.taken_at_timestamp,
+    imageUrl: node.display_url,
+    isVideo: !!node.is_video,
+    likes: node.edge_liked_by?.count || 0,
+    comments: node.edge_media_to_comment?.count || 0
+  };
 }
 
-function calcularDuracion(inicio, fin) {
-  const diferencia = fin - inicio;
-  const horas = Math.floor(diferencia / 3600000);
-  const minutos = Math.floor((diferencia % 3600000) / 60000);
-  return `${horas}h ${minutos}min`;
+function buildInstagramPostUrl(shortcode) {
+  return `https://www.instagram.com/p/${shortcode}/`;
 }
 
-async function enviarRegistro(embed) {
-  const canalRegistro = await client.channels.fetch(ID_CANAL_REGISTRO).catch(() => null);
-  if (!canalRegistro || canalRegistro.type !== ChannelType.GuildText) return;
-  await canalRegistro.send({ embeds: [embed] });
+async function fetchProfilePosts(username) {
+  const endpoints = [
+    `https://www.instagram.com/api/v1/users/web_profile_info/?username=${encodeURIComponent(username)}`,
+    `https://www.instagram.com/${encodeURIComponent(username)}/?__a=1&__d=dis`
+  ];
+
+  const headers = {
+    'accept': 'application/json',
+    'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+    'x-ig-app-id': '936619743392459'
+  };
+
+  for (const endpoint of endpoints) {
+    try {
+      const response = await fetch(endpoint, { headers });
+      if (!response.ok) continue;
+      const data = await response.json();
+
+      const edges = data?.data?.user?.edge_owner_to_timeline_media?.edges
+        || data?.graphql?.user?.edge_owner_to_timeline_media?.edges;
+
+      if (!Array.isArray(edges) || edges.length === 0) continue;
+
+      const posts = edges
+        .map((edge) => normalizePost(edge.node))
+        .filter((post) => post && post.id && post.shortcode);
+
+      if (posts.length > 0) {
+        return posts.sort((a, b) => (b.takenAt || 0) - (a.takenAt || 0));
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  return [];
 }
 
-async function enviarPanelServicioSiNoExiste() {
-  const canalServicio = await client.channels.fetch(ID_CANAL_SERVICIO).catch(() => null);
-  if (!canalServicio || canalServicio.type !== ChannelType.GuildText) {
-    console.error(`No se encontro canal de servicio valido: ${ID_CANAL_SERVICIO}`);
+function createPostEmbed(post) {
+  const postUrl = buildInstagramPostUrl(post.shortcode);
+  const caption = post.caption
+    ? post.caption.length > 300
+      ? `${post.caption.slice(0, 297)}...`
+      : post.caption
+    : 'Sin descripcion';
+
+  const publishedAt = post.takenAt ? new Date(post.takenAt * 1000) : new Date();
+
+  const embed = new EmbedBuilder()
+    .setColor(0xE1306C)
+    .setAuthor({
+      name: `Nueva publicacion de @${INSTAGRAM_USERNAME}`,
+      url: `https://www.instagram.com/${INSTAGRAM_USERNAME}/`
+    })
+    .setTitle('Ver publicacion en Instagram')
+    .setURL(postUrl)
+    .setDescription(caption)
+    .addFields(
+      { name: 'Likes', value: String(post.likes), inline: true },
+      { name: 'Comentarios', value: String(post.comments), inline: true },
+      { name: 'Tipo', value: post.isVideo ? 'Video' : 'Imagen', inline: true }
+    )
+    .setFooter({ text: `Instagram: ${INSTAGRAM_USERNAME}` })
+    .setTimestamp(publishedAt);
+
+  if (post.imageUrl) {
+    embed.setImage(post.imageUrl);
+  }
+
+  return embed;
+}
+
+async function postToDiscord(post) {
+  const channel = await client.channels.fetch(DISCORD_CHANNEL_ID).catch(() => null);
+  if (!channel) {
+    throw new Error(`No se encontro el canal ${DISCORD_CHANNEL_ID}.`);
+  }
+
+  const isTextChannel = channel.type === ChannelType.GuildText || channel.type === ChannelType.GuildAnnouncement;
+  if (!isTextChannel) {
+    throw new Error(`El canal ${DISCORD_CHANNEL_ID} no es de texto.`);
+  }
+
+  const postUrl = buildInstagramPostUrl(post.shortcode);
+  const embed = createPostEmbed(post);
+
+  await channel.send({ content: postUrl, embeds: [embed] });
+}
+
+async function checkInstagram({ isInitialCheck = false } = {}) {
+  const posts = await fetchProfilePosts(INSTAGRAM_USERNAME);
+  if (posts.length === 0) {
+    console.warn('No se pudieron obtener publicaciones de Instagram en este intento.');
     return;
   }
 
-  const mensajes = await canalServicio.messages.fetch({ limit: 20 }).catch(() => null);
-  const panelExistente = mensajes?.find((msg) =>
-    msg.author.id === client.user.id &&
-    msg.components?.some((fila) =>
-      fila.components?.some((componente) =>
-        componente.customId === BOTON_ENTRAR || componente.customId === BOTON_SALIR
-      )
-    )
-  );
+  const latest = posts[0];
 
-  if (panelExistente) return;
+  if (!lastPublishedPostId) {
+    if (isInitialCheck && POST_ON_STARTUP) {
+      await postToDiscord(latest);
+      console.log(`Publicacion inicial enviada: ${latest.id}`);
+    }
 
-  const embedPanel = new EmbedBuilder()
-    .setColor(0x2B2D31)
-    .setTitle('Panel de servicio - AutoExotic')
-    .setDescription('Usa los botones para iniciar o finalizar tu jornada.')
-    .addFields(
-      { name: 'Entrar de servicio', value: 'Marca tu hora de entrada.' },
-      { name: 'Salir de servicio', value: 'Registra tu salida y horas trabajadas.' }
-    )
-    .setTimestamp();
-
-  await canalServicio.send({ embeds: [embedPanel], components: [crearFilaBotonesServicio()] });
-}
-
-async function iniciarServicio({ user, member, channel }) {
-  const userId = user.id;
-
-  if (turnos.has(userId)) {
-    return { ok: false, mensaje: 'Ya te encuentras en servicio.' };
+    lastPublishedPostId = latest.id;
+    await saveState();
+    return;
   }
 
-  const horaEntrada = new Date();
-  turnos.set(userId, horaEntrada);
-
-  const nombre = member?.displayName || user.username;
-  const embedEntrada = new EmbedBuilder()
-    .setColor(0x57F287)
-    .setTitle('Inicio de servicio')
-    .setDescription(`**${nombre}** entro al servicio.`)
-    .addFields(
-      { name: 'Hora de entrada', value: formatoHora(horaEntrada), inline: true },
-      { name: 'Fecha', value: formatoFecha(horaEntrada), inline: true }
-    )
-    .setThumbnail(user.displayAvatarURL())
-    .setTimestamp();
-
-  const embedLogEntrada = new EmbedBuilder()
-    .setColor(0x57F287)
-    .setTitle('Registro de horas - Entrada')
-    .addFields(
-      { name: 'Empleado', value: `${nombre} (<@${userId}>)` },
-      { name: 'Hora de entrada', value: formatoHora(horaEntrada), inline: true },
-      { name: 'Fecha', value: formatoFecha(horaEntrada), inline: true }
-    )
-    .setTimestamp();
-
-  await enviarRegistro(embedLogEntrada);
-  return { ok: true, mensaje: 'Entrada registrada correctamente.', embed: embedEntrada };
-}
-
-async function finalizarServicio({ user, member, channel }) {
-  const userId = user.id;
-
-  if (!turnos.has(userId)) {
-    return { ok: false, mensaje: 'No tienes un servicio activo.' };
+  if (latest.id !== lastPublishedPostId) {
+    await postToDiscord(latest);
+    lastPublishedPostId = latest.id;
+    await saveState();
+    console.log(`Nueva publicacion enviada: ${latest.id}`);
   }
-
-  const horaEntrada = turnos.get(userId);
-  const horaSalida = new Date();
-  const duracion = calcularDuracion(horaEntrada, horaSalida);
-  turnos.delete(userId);
-
-  const nombre = member?.displayName || user.username;
-  const embedSalida = new EmbedBuilder()
-    .setColor(0xED4245)
-    .setTitle('Fin de servicio')
-    .setDescription(`**${nombre}** salio del servicio.`)
-    .addFields(
-      { name: 'Entrada', value: formatoHora(horaEntrada), inline: true },
-      { name: 'Salida', value: formatoHora(horaSalida), inline: true },
-      { name: 'Tiempo trabajado', value: duracion }
-    )
-    .setThumbnail(user.displayAvatarURL())
-    .setTimestamp();
-
-  await channel.send({ embeds: [embedSalida] });
-
-  const embedLogSalida = new EmbedBuilder()
-    .setColor(0xED4245)
-    .setTitle('Registro de horas - Salida')
-    .addFields(
-      { name: 'Empleado', value: `${nombre} (<@${userId}>)` },
-      { name: 'Entrada', value: formatoHora(horaEntrada), inline: true },
-      { name: 'Salida', value: formatoHora(horaSalida), inline: true },
-      { name: 'Tiempo trabajado', value: duracion, inline: true },
-      { name: 'Fecha', value: formatoFecha(horaEntrada), inline: true }
-    )
-    .setTimestamp();
-
-  await enviarRegistro(embedLogSalida);
-  return { ok: true, mensaje: 'Salida registrada correctamente.' };
 }
 
-client.once('ready', () => {
+client.once('ready', async () => {
   console.log(`Bot conectado como ${client.user.tag}`);
-  enviarPanelServicioSiNoExiste().catch((error) => {
-    console.error('Error enviando panel de servicio:', error);
-  });
-});
+  console.log(`Monitoreando Instagram: @${INSTAGRAM_USERNAME}`);
+  console.log(`Canal destino: ${DISCORD_CHANNEL_ID}`);
 
-client.on('interactionCreate', async (interaction) => {
-  if (!interaction.isButton()) return;
-  if (interaction.channelId !== ID_CANAL_SERVICIO) {
-    await interaction.reply({
-      content: `Este panel solo funciona en el canal configurado (<#${ID_CANAL_SERVICIO}>).`,
-      ephemeral: true
-    });
-    return;
-  }
+  await loadState();
 
   try {
-    if (interaction.customId === BOTON_ENTRAR) {
-      const resultado = await iniciarServicio({
-        user: interaction.user,
-        member: interaction.member,
-        channel: interaction.channel
-      });
-      await interaction.reply({
-        content: resultado.mensaje,
-        embeds: resultado.embed ? [resultado.embed] : [],
-        ephemeral: true
-      });
-      return;
-    }
-
-    if (interaction.customId === BOTON_SALIR) {
-      const resultado = await finalizarServicio({
-        user: interaction.user,
-        member: interaction.member,
-        channel: interaction.channel
-      });
-      await interaction.reply({ content: resultado.mensaje, ephemeral: true });
-    }
+    await checkInstagram({ isInitialCheck: true });
   } catch (error) {
-    console.error('Error en interaccion de botones:', error);
-    if (!interaction.replied && !interaction.deferred) {
-      await interaction.reply({ content: 'No se pudo procesar tu accion.', ephemeral: true });
-      return;
-    }
-    await interaction.followUp({ content: 'No se pudo procesar tu accion.', ephemeral: true });
+    console.error('Error en verificacion inicial:', error.message);
   }
-});
 
-client.on('messageCreate', async (message) => {
-  if (message.author.bot || !message.guild) return;
-  if (!message.content.startsWith(PREFIJO)) return;
-
-  const sinPrefijo = message.content.slice(PREFIJO.length).trim();
-  const [comando, ...args] = sinPrefijo.split(/\s+/);
-  const cmd = (comando || '').toLowerCase();
-
-  try {
-    if (cmd === 'entrar' || (cmd === 'servicio' && args[0]?.toLowerCase() === 'entrar')) {
-      const resultado = await iniciarServicio({
-        user: message.author,
-        member: message.member,
-        channel: message.channel
-      });
-      await message.reply(resultado.mensaje);
-      return;
+  const intervalMs = Math.max(1, CHECK_INTERVAL_MINUTES) * 60 * 1000;
+  setInterval(async () => {
+    try {
+      await checkInstagram();
+    } catch (error) {
+      console.error('Error comprobando Instagram:', error.message);
     }
-
-    if (cmd === 'salir' || (cmd === 'servicio' && args[0]?.toLowerCase() === 'salir')) {
-      const resultado = await finalizarServicio({
-        user: message.author,
-        member: message.member,
-        channel: message.channel
-      });
-      await message.reply(resultado.mensaje);
-      return;
-    }
-
-    if (cmd === 'panel') {
-      if (!message.member.permissions.has(PermissionFlagsBits.ManageChannels)) {
-        await message.reply('No tienes permisos para publicar el panel.');
-        return;
-      }
-
-      if (message.channelId !== ID_CANAL_SERVICIO) {
-        await message.reply(`El panel solo se publica en <#${ID_CANAL_SERVICIO}>.`);
-        return;
-      }
-
-      await enviarPanelServicioSiNoExiste();
-      await message.reply('Panel de servicio verificado en este canal.');
-      return;
-    }
-
-    if (cmd === 'anuncio') {
-      if (!message.member.permissions.has(PermissionFlagsBits.ManageMessages)) {
-        await message.reply('No tienes permisos para hacer anuncios.');
-        return;
-      }
-
-      const texto = args.join(' ').trim();
-      if (!texto) {
-        await message.reply(`Uso: ${PREFIJO}anuncio <mensaje>`);
-        return;
-      }
-
-      const embedAnuncio = new EmbedBuilder()
-        .setColor(0xFEE75C)
-        .setAuthor({
-          name: `Anuncio de ${message.member?.displayName || message.author.username}`,
-          iconURL: message.author.displayAvatarURL()
-        })
-        .setTitle('Anuncio - AutoExotic')
-        .setDescription(texto)
-        .setFooter({ text: 'AutoExotic | Staff' })
-        .setTimestamp();
-
-      await message.channel.send({ embeds: [embedAnuncio] });
-      if (message.guild.members.me?.permissions.has(PermissionFlagsBits.ManageMessages)) {
-        await message.delete().catch(() => null);
-      }
-      return;
-    }
-
-    if (cmd === 'ayuda') {
-      const embedAyuda = new EmbedBuilder()
-        .setColor(0x5865F2)
-        .setTitle('Comandos disponibles')
-        .setDescription([
-          `${PREFIJO}panel (admin, solo canal de servicio)`,
-          `${PREFIJO}entrar o ${PREFIJO}servicio entrar`,
-          `${PREFIJO}salir o ${PREFIJO}servicio salir`,
-          `${PREFIJO}anuncio <mensaje>`,
-          `${PREFIJO}ayuda`
-        ].join('\n'));
-
-      await message.reply({ embeds: [embedAyuda] });
-    }
-  } catch (error) {
-    console.error('Error procesando comando:', error);
-    await message.reply('Ocurrio un error ejecutando el comando. Revisa configuracion y permisos.');
-  }
+  }, intervalMs);
 });
 
 client.login(TOKEN);

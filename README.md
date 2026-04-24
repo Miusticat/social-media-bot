@@ -1,117 +1,69 @@
-# Discord Bot AutoExotic
+# Discord Social Media Bot
 
-Bot de Discord para gestionar jornadas de servicio del staff de AutoExotic con botones, validaciones y registro de horas en un canal de historial.
+Bot de Discord para publicar automaticamente las nuevas publicaciones de Instagram en un canal de Discord mediante embed.
 
-## Funcionalidades
+## Objetivo configurado
 
-- Panel con botones en canal de servicio:
-  - Entrar de servicio
-  - Salir de servicio
-- Validaciones de estado:
-  - Si ya estas en servicio, no permite entrar de nuevo.
-  - Si no estas en servicio, no permite salir.
-- Registro automatico de entradas y salidas en canal de historial.
-- Comando de anuncios en formato embed para staff.
-- Comando de ayuda.
+- Cuenta de Instagram monitorizada: https://www.instagram.com/gtaworld_es_oficial/
+- Canal de Discord destino: https://discord.com/channels/1419780364263755798/1455996281272012932
+
+## Que hace el bot
+
+- Consulta Instagram periodicamente.
+- Detecta si hay una nueva publicacion en el perfil configurado.
+- Envia al canal de Discord:
+  - URL del post de Instagram.
+  - Embed con imagen/video preview, descripcion corta, likes y comentarios.
+- Guarda el ultimo post enviado en un archivo local para no duplicar publicaciones al reiniciar.
 
 ## Requisitos
 
 - Node.js 18 o superior.
-- Un bot de Discord creado en Discord Developer Portal.
-- Permisos del bot en servidor:
-  - View Channels
+- Bot de Discord con permisos en el canal destino:
+  - View Channel
   - Send Messages
   - Embed Links
-  - Read Message History
-  - Manage Messages (opcional, para borrar el mensaje de comando de anuncio)
 
 ## Instalacion
-
-1. Clonar o descargar este repositorio.
-2. Instalar dependencias:
 
 ```bash
 npm install
 ```
 
-3. Crear archivo `.env` a partir de `.env.example`.
-4. Iniciar bot:
+## Configuracion (.env)
+
+Ejemplo:
+
+```env
+DISCORD_TOKEN=pon_aqui_tu_token
+INSTAGRAM_USERNAME=gtaworld_es_oficial
+DISCORD_CHANNEL_ID=1455996281272012932
+CHECK_INTERVAL_MINUTES=10
+POST_ON_STARTUP=false
+STATE_FILE=.ig-state.json
+```
+
+Variables:
+
+- `DISCORD_TOKEN`: token del bot.
+- `INSTAGRAM_USERNAME`: usuario de Instagram a monitorizar.
+- `DISCORD_CHANNEL_ID`: canal de Discord donde se publican los embeds.
+- `CHECK_INTERVAL_MINUTES`: cada cuantos minutos revisa Instagram.
+- `POST_ON_STARTUP`: si es `true`, publica el ultimo post al iniciar aun cuando no sea nuevo.
+- `STATE_FILE`: archivo donde se guarda el ultimo post publicado.
+
+## Ejecutar
 
 ```bash
 npm start
 ```
 
-## Configuracion (.env)
+## Notas
 
-Usa este formato:
-
-```env
-DISCORD_TOKEN=pon_aqui_tu_token
-SERVICE_CHANNEL_ID=1483893982734843915
-LOG_CHANNEL_ID=1465430858222666022
-PREFIX=!
-```
-
-Descripcion de variables:
-
-- `DISCORD_TOKEN`: token del bot.
-- `SERVICE_CHANNEL_ID`: canal donde vive el panel de botones de servicio.
-- `LOG_CHANNEL_ID`: canal donde se registra el historial de horas.
-- `PREFIX`: prefijo de comandos por mensaje.
-
-## Uso
-
-### Panel de servicio (botones)
-
-Al iniciar, el bot intenta publicar automaticamente un panel en el canal de servicio.
-
-- Boton Entrar de servicio:
-  - Marca hora de entrada.
-  - Publica confirmacion en el canal.
-  - Registra entrada en canal de historial.
-
-- Boton Salir de servicio:
-  - Marca hora de salida.
-  - Calcula tiempo trabajado.
-  - Publica confirmacion en el canal.
-  - Registra salida en canal de historial.
-
-## Comandos disponibles
-
-- `!panel`
-  - Revisa/publica el panel en el canal de servicio.
-  - Requiere permiso Manage Channels.
-
-- `!entrar` o `!servicio entrar`
-  - Inicia servicio por comando de texto.
-
-- `!salir` o `!servicio salir`
-  - Finaliza servicio por comando de texto.
-
-- `!anuncio <mensaje>`
-  - Publica anuncio en embed.
-  - Requiere permiso Manage Messages.
-
-- `!ayuda`
-  - Muestra la lista de comandos.
-
-## Notas tecnicas
-
-- El control de servicio esta en memoria (Map en runtime).
-- Si el bot se reinicia, los turnos activos no persisten.
-- Si necesitas persistencia, el siguiente paso recomendado es integrar una base de datos (SQLite, PostgreSQL, etc.).
-
-## Seguridad
-
-- Nunca subas tu token real al repositorio.
-- Mantener `.env` en `.gitignore`.
-- Si un token se expone, regenerarlo inmediatamente en Discord Developer Portal.
+- El bot no usa comandos de texto ni botones; solo automatizacion de social media.
+- Si Instagram cambia sus endpoints internos, puede requerir ajuste del metodo de lectura.
 
 ## Scripts
 
-- `npm start`: ejecuta el bot.
-- `npm test`: placeholder (sin pruebas configuradas).
-
-## Licencia
-
-ISC
+- `npm start`: inicia el bot.
+- `npm test`: placeholder.
