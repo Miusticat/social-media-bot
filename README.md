@@ -1,75 +1,108 @@
 # Discord Social Media Bot
 
-Bot de Discord para publicar automaticamente las nuevas publicaciones de Instagram en un canal de Discord mediante embed.
+Bot de Discord para automatizar la publicación de contenido de Instagram en un canal específico, usando la Instagram API con Facebook Login y embeds nativos de Discord.
 
-## Objetivo configurado
+Este proyecto fue producido por **Miusticat** para **GTA WORLD ES** como una base sólida de automatización social media para Discord.
 
-- Cuenta de Instagram monitorizada: https://www.instagram.com/gtaworld_es_oficial/
-- Canal de Discord destino: https://discord.com/channels/1419780364263755798/1455996281272012932
+## Resumen
 
-## Que hace el bot
+El bot monitorea el perfil de Instagram configurado, detecta nuevas publicaciones y las replica automáticamente en Discord con:
 
-- Consulta Instagram periodicamente.
-- Detecta si hay una nueva publicacion en el perfil configurado.
-- Envia al canal de Discord:
-  - URL del post de Instagram.
-  - Embed con imagen/video preview, descripcion corta, likes y comentarios cuando la API los devuelve.
-- Guarda el ultimo post enviado en un archivo local para no duplicar publicaciones al reiniciar.
+- embed visual con imagen o video preview;
+- métricas de la publicación cuando la API las entrega;
+- botón directo para abrir la publicación original;
+- control de estado local para evitar duplicados.
+
+## Demo funcional
+
+- Instagram monitorizado: [@gtaworld_es_oficial](https://www.instagram.com/gtaworld_es_oficial/)
+- Canal de Discord destino: [#miusticat-notas](https://discord.com/channels/1486040915364806756/1494481432767238195)
+
+## Funcionalidades clave
+
+- Detección automática de nuevas publicaciones por polling.
+- Publicación inmediata en Discord con embed y botón `IR A LA PUBLICACIÓN`.
+- Lectura de `like_count` y `comments_count` desde la API oficial cuando están disponibles.
+- Persistencia local del último post publicado para evitar repeticiones.
+- Configuración por variables de entorno para facilitar despliegues.
+
+## Stack
+
+- Node.js 18+
+- `discord.js`
+- `dotenv`
+- Instagram API with Facebook Login
 
 ## Requisitos
 
-- Node.js 18 o superior.
-- Bot de Discord con permisos en el canal destino:
+- Un bot de Discord con acceso al servidor y al canal destino.
+- Permisos del bot en el canal:
   - View Channel
   - Send Messages
   - Embed Links
+- Token válido de Instagram API con Facebook Login.
 
-## Instalacion
+## Instalación
 
 ```bash
 npm install
 ```
 
-## Configuracion (.env)
+## Configuración
 
-Ejemplo:
+Define un archivo `.env` con esta estructura:
 
 ```env
 DISCORD_TOKEN=pon_aqui_tu_token
 INSTAGRAM_USERNAME=gtaworld_es_oficial
-INSTAGRAM_MEDIA_API_URL=https://graph.instagram.com/me/media?fields=id,caption,media_type,media_url,permalink,timestamp&access_token=tu_token
+INSTAGRAM_MEDIA_API_URL=https://graph.instagram.com/me/media?fields=id,caption,media_type,media_url,permalink,timestamp,like_count,comments_count&access_token=tu_token
 INSTAGRAM_ACCESS_TOKEN=tu_token
-DISCORD_CHANNEL_ID=1455996281272012932
+DISCORD_CHANNEL_ID=1494481432767238195
 CHECK_INTERVAL_MINUTES=1
-POST_ON_STARTUP=false
+POST_ON_STARTUP=true
 STATE_FILE=.ig-state.json
 ```
 
-Variables:
+### Variables principales
 
-- `DISCORD_TOKEN`: token del bot.
-- `INSTAGRAM_USERNAME`: usuario de Instagram a monitorizar.
-- `INSTAGRAM_MEDIA_API_URL`: endpoint completo de la API de Instagram con `access_token`. Si no lo indicas, el bot construye uno con `like_count` y `comments_count` incluidos.
-- `INSTAGRAM_ACCESS_TOKEN`: alternativa si prefieres que el bot construya el endpoint automaticamente.
-- `DISCORD_CHANNEL_ID`: canal de Discord donde se publican los embeds.
-- `CHECK_INTERVAL_MINUTES`: cada cuantos minutos revisa Instagram. El valor recomendado para deteccion rapida es `1`.
-- `POST_ON_STARTUP`: si es `true`, publica el ultimo post al iniciar aun cuando no sea nuevo.
-- `STATE_FILE`: archivo donde se guarda el ultimo post publicado.
+- `DISCORD_TOKEN`: token del bot de Discord.
+- `INSTAGRAM_USERNAME`: nombre de usuario del perfil a monitorizar.
+- `INSTAGRAM_MEDIA_API_URL`: endpoint completo de Instagram. Si no lo defines, el bot lo construye con `INSTAGRAM_ACCESS_TOKEN`.
+- `INSTAGRAM_ACCESS_TOKEN`: token de acceso para la API oficial.
+- `DISCORD_CHANNEL_ID`: canal de Discord donde se publican los posts.
+- `CHECK_INTERVAL_MINUTES`: intervalo de revisión. Para detección rápida se recomienda `1`.
+- `POST_ON_STARTUP`: si es `true`, publica el último post al arrancar.
+- `STATE_FILE`: archivo local para guardar el último post publicado.
 
-## Ejecutar
+## Uso
 
 ```bash
 npm start
 ```
 
-## Notas
+## Flujo de trabajo
 
-- El bot usa la Instagram API con Facebook Login a traves del endpoint configurado.
-- Si tu token expira, debes renovarlo y actualizar `INSTAGRAM_MEDIA_API_URL` o `INSTAGRAM_ACCESS_TOKEN`.
-- Si la cuenta o el token no exponen `like_count` o `comments_count`, el bot mostrara `0` para esos campos.
-- El bot detecta nuevas publicaciones por polling; con intervalo de `1` minuto la deteccion es casi inmediata.
+1. El bot arranca y carga el estado local.
+2. Consulta Instagram en el intervalo configurado.
+3. Si detecta una publicación nueva, la envía al canal de Discord.
+4. Añade un embed con preview, métricas y botón de acceso directo.
+5. Guarda el ID del último post para no duplicarlo.
+
+## Notas técnicas
+
+- La detección es por polling; con un intervalo de 1 minuto la respuesta es rápida y estable.
+- Si la API no expone métricas, el bot muestra `0` en likes y comentarios.
+- Si el token expira, debes renovarlo y actualizar el `.env`.
 
 ## Scripts
 
 - `npm start`: inicia el bot.
 - `npm test`: placeholder.
+
+## Autoría
+
+© 2026 **Miusticat**. Proyecto producido para **GTA WORLD ES**.
+
+## Licencia
+
+Uso interno y de portfolio, salvo indicación distinta del autor.
