@@ -5,10 +5,13 @@ const { Client, GatewayIntentBits, EmbedBuilder, ChannelType } = require('discor
 
 const TOKEN = process.env.DISCORD_TOKEN;
 const INSTAGRAM_USERNAME = process.env.INSTAGRAM_USERNAME || 'gtaworld_es_oficial';
+const INSTAGRAM_MEDIA_API_URL = process.env.INSTAGRAM_MEDIA_API_URL || '';
+const INSTAGRAM_ACCESS_TOKEN = process.env.INSTAGRAM_ACCESS_TOKEN || '';
 const DISCORD_CHANNEL_ID = process.env.DISCORD_CHANNEL_ID || '1455996281272012932';
-const CHECK_INTERVAL_MINUTES = Number(process.env.CHECK_INTERVAL_MINUTES || 10);
+const CHECK_INTERVAL_MINUTES = Number(process.env.CHECK_INTERVAL_MINUTES || 1);
 const POST_ON_STARTUP = String(process.env.POST_ON_STARTUP || 'false').toLowerCase() === 'true';
 const STATE_FILE = path.resolve(process.env.STATE_FILE || '.ig-state.json');
+const BUTTON_LABEL = 'IR A LA PUBLICACIÓN';
 
 if (!TOKEN) {
   console.error('Falta la variable de entorno DISCORD_TOKEN.');
@@ -18,6 +21,7 @@ if (!TOKEN) {
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
 let lastPublishedPostId = null;
+let isCheckingInstagram = false;
 
 async function loadState() {
   try {
@@ -54,42 +58,60 @@ function buildInstagramPostUrl(shortcode) {
   return `https://www.instagram.com/p/${shortcode}/`;
 }
 
-async function fetchProfilePosts(username) {
-  const endpoints = [
-    `https://www.instagram.com/api/v1/users/web_profile_info/?username=${encodeURIComponent(username)}`,
-    `https://www.instagram.com/${encodeURIComponent(username)}/?__a=1&__d=dis`
-  ];
-
-  const headers = {
-    'accept': 'application/json',
-    'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-    'x-ig-app-id': '936619743392459'
-  };
-
-  for (const endpoint of endpoints) {
-    try {
-      const response = await fetch(endpoint, { headers });
-      if (!response.ok) continue;
-      const data = await response.json();
-
-      const edges = data?.data?.user?.edge_owner_to_timeline_media?.edges
-        || data?.graphql?.user?.edge_owner_to_timeline_media?.edges;
-
-      if (!Array.isArray(edges) || edges.length === 0) continue;
-
-      const posts = edges
-        .map((edge) => normalizePost(edge.node))
-        .filter((post) => post && post.id && post.shortcode);
-
-      if (posts.length > 0) {
-        return posts.sort((a, b) => (b.takenAt || 0) - (a.takenAt || 0));
-      }
-    } catch {
-      continue;
-    }
+function buildInstagramMediaApiUrl() {
+  if (INSTAGRAM_MEDIA_API_URL) {
+    return INSTAGRAM_MEDIA_API_URL;
   }
 
-  return [];
+  if (!INSTAGRAM_ACCESS_TOKEN) {
+    return '';
+  }
+
+  return 'https://graph.instagram.com/me/media?fields=id,caption,media_type,media_url,permalink,timestamp,like_count,comments_count&access_token=' + encodeURIComponent(INSTAGRAM_ACCESS_TOKEN);
+}
+
+function normalizeApiMediaItem(item) {
+  if (!item) return null;
+
+  const permalink = item.permalink || '';
+  const shortcodeMatch = permalink.match(/instagram\.com\/p\/([^/?#]+)/i);
+  const shortcode = shortcodeMatch?.[1] || item.id || '';
+
+  return {
+    id: String(item.id || ''),
+    shortcode,
+    caption: item.caption || '',
+    takenAt: item.timestamp ? Date.parse(item.timestamp) / 1000 : null,
+    imageUrl: item.media_url || '',
+    isVideo: String(item.media_type || '').toUpperCase() === 'VIDEO',
+    likes: Number(item.like_count || 0),
+    comments: Number(item.comments_count || 0),
+    permalink: permalink || buildInstagramPostUrl(shortcode)
+  };
+}
+
+async function fetchProfilePosts() {
+  const endpoint = buildInstagramMediaApiUrl();
+  if (!endpoint) {
+    throw new Error('Falta INSTAGRAM_MEDIA_API_URL o INSTAGRAM_ACCESS_TOKEN en el entorno.');
+  }
+
+  const response = await fetch(endpoint, { headers: { accept: 'application/json' } });
+  if (!response.ok) {
+    const body = await response.text().catch(() => '');
+    throw new Error(`Instagram API respondio ${response.status}: ${body.slice(0, 180)}`);
+  }
+
+  const data = await response.json();
+  const items = Array.isArray(data?.data) ? data.data : Array.isArray(data?.media?.data) ? data.media.data : [];
+
+  if (!Array.isArray(items) || items.length === 0) {
+    return [];
+  }
+
+  return items
+    .map((item) => normalizeApiMediaItem(item))
+    .filter((post) => post && post.id);
 }
 
 function createPostEmbed(post) {
@@ -126,6 +148,22 @@ function createPostEmbed(post) {
   return embed;
 }
 
+function createPostButtonRow(postUrl) {
+  return [
+    {
+      type: 1,
+      components: [
+        {
+          type: 2,
+          style: 5,
+          label: BUTTON_LABEL,
+          url: postUrl
+        }
+      ]
+    }
+  ];
+}
+
 async function postToDiscord(post) {
   const channel = await client.channels.fetch(DISCORD_CHANNEL_ID).catch(() => null);
   if (!channel) {
@@ -139,35 +177,46 @@ async function postToDiscord(post) {
 
   const postUrl = buildInstagramPostUrl(post.shortcode);
   const embed = createPostEmbed(post);
+  const components = createPostButtonRow(postUrl);
 
-  await channel.send({ content: postUrl, embeds: [embed] });
+  await channel.send({ content: postUrl, embeds: [embed], components });
 }
 
 async function checkInstagram({ isInitialCheck = false } = {}) {
-  const posts = await fetchProfilePosts(INSTAGRAM_USERNAME);
-  if (posts.length === 0) {
-    console.warn('No se pudieron obtener publicaciones de Instagram en este intento.');
+  if (isCheckingInstagram) {
     return;
   }
 
-  const latest = posts[0];
+  isCheckingInstagram = true;
 
-  if (!lastPublishedPostId) {
-    if (isInitialCheck && POST_ON_STARTUP) {
-      await postToDiscord(latest);
-      console.log(`Publicacion inicial enviada: ${latest.id}`);
+  try {
+    const posts = await fetchProfilePosts();
+    if (posts.length === 0) {
+      console.warn('No se pudieron obtener publicaciones de Instagram en este intento.');
+      return;
     }
 
-    lastPublishedPostId = latest.id;
-    await saveState();
-    return;
-  }
+    const latest = posts[0];
 
-  if (latest.id !== lastPublishedPostId) {
-    await postToDiscord(latest);
-    lastPublishedPostId = latest.id;
-    await saveState();
-    console.log(`Nueva publicacion enviada: ${latest.id}`);
+    if (!lastPublishedPostId) {
+      if (isInitialCheck && POST_ON_STARTUP) {
+        await postToDiscord(latest);
+        console.log(`Publicacion inicial enviada: ${latest.id}`);
+      }
+
+      lastPublishedPostId = latest.id;
+      await saveState();
+      return;
+    }
+
+    if (latest.id !== lastPublishedPostId) {
+      await postToDiscord(latest);
+      lastPublishedPostId = latest.id;
+      await saveState();
+      console.log(`Nueva publicacion enviada: ${latest.id}`);
+    }
+  } finally {
+    isCheckingInstagram = false;
   }
 }
 
