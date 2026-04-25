@@ -16,7 +16,7 @@ El bot monitorea el perfil de Instagram configurado, detecta nuevas publicacione
 ## Demo funcional
 
 - Instagram monitorizado: [@gtaworld_es_oficial](https://www.instagram.com/gtaworld_es_oficial/)
-- Canal de Discord destino: [#miusticat-notas](https://discord.com/channels/1486040915364806756/1494481432767238195)
+- Canal de Discord destino: `https://discord.com/channels/<guild_id>/<channel_id>`
 
 ## Funcionalidades clave
 
@@ -57,7 +57,7 @@ DISCORD_TOKEN=pon_aqui_tu_token
 INSTAGRAM_USERNAME=gtaworld_es_oficial
 INSTAGRAM_MEDIA_API_URL=https://graph.instagram.com/me/media?fields=id,caption,media_type,media_url,permalink,timestamp,like_count,comments_count&access_token=tu_token
 INSTAGRAM_ACCESS_TOKEN=tu_token
-DISCORD_CHANNEL_ID=1494481432767238195
+DISCORD_CHANNEL_ID=pon_aqui_el_id_de_tu_canal
 CHECK_INTERVAL_MINUTES=1
 POST_ON_STARTUP=true
 STATE_FILE=.ig-state.json
@@ -69,7 +69,7 @@ STATE_FILE=.ig-state.json
 - `INSTAGRAM_USERNAME`: nombre de usuario del perfil a monitorizar.
 - `INSTAGRAM_MEDIA_API_URL`: endpoint completo de Instagram. Si no lo defines, el bot lo construye con `INSTAGRAM_ACCESS_TOKEN`.
 - `INSTAGRAM_ACCESS_TOKEN`: token de acceso para la API oficial.
-- `DISCORD_CHANNEL_ID`: canal de Discord donde se publican los posts.
+- `DISCORD_CHANNEL_ID`: canal de Discord donde se publican los posts. Usa el ID de tu propio servidor.
 - `CHECK_INTERVAL_MINUTES`: intervalo de revisión. Para detección rápida se recomienda `1`.
 - `POST_ON_STARTUP`: si es `true`, publica el último post al arrancar.
 - `STATE_FILE`: archivo local para guardar el último post publicado.
