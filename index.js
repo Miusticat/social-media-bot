@@ -92,6 +92,10 @@ async function registerCommands() {
     new SlashCommandBuilder()
       .setName('resetstate')
       .setDescription('Resetea el estado de publicaciones (muestra todas nuevamente)')
+      .toJSON(),
+    new SlashCommandBuilder()
+      .setName('status')
+      .setDescription('Muestra el estado actual del bot')
       .toJSON()
   ];
 
@@ -177,15 +181,23 @@ async function fetchProfilePosts() {
   }
 
   const data = await response.json();
+  
+  // Log para debugging
+  console.log('Respuesta de Instagram API:', JSON.stringify(data).slice(0, 300));
+  
   const items = Array.isArray(data?.data) ? data.data : Array.isArray(data?.media?.data) ? data.media.data : [];
 
   if (!Array.isArray(items) || items.length === 0) {
+    console.warn('No se obtuvieron items de Instagram. Estructura:', Object.keys(data));
     return [];
   }
 
-  return items
+  const normalized = items
     .map((item) => normalizeApiMediaItem(item))
     .filter((post) => post && post.id);
+  
+  console.log(`✅ Se obtuvieron ${normalized.length} posts de Instagram`);
+  return normalized;
 }
 
 function createPostEmbed(post) {
@@ -391,9 +403,12 @@ client.on('interactionCreate', async (interaction) => {
           });
         } catch (err) {
           console.error('Error en comando publicar:', err?.message || err);
-          await interaction.editReply({
-            content: '❌ Error al obtener publicaciones.'
-          });
+          console.error('Stack completo:', err?.stack);
+          try {
+            await interaction.editReply({
+              content: `❌ Error: ${err?.message || 'Error desconocido al obtener publicaciones.'}`
+            });
+          } catch {}
         }
       }
 
@@ -420,6 +435,32 @@ client.on('interactionCreate', async (interaction) => {
           console.error('Error reseteando estado:', err?.message || err);
           await interaction.reply({
             content: '❌ Error al resetear el estado.',
+            ephemeral: true
+          });
+        }
+      }
+
+      if (interaction.commandName === 'status') {
+        try {
+          const channel = await client.channels.fetch(DISCORD_CHANNEL_ID).catch(() => null);
+          const channelName = channel ? `<#${DISCORD_CHANNEL_ID}>` : `Desconocido (${DISCORD_CHANNEL_ID})`;
+          
+          let statusText = '📊 **Estado del Bot**\n\n';
+          statusText += `🤖 Bot: ${client.user.tag}\n`;
+          statusText += `📸 Instagram: @${INSTAGRAM_USERNAME}\n`;
+          statusText += `📤 Canal: ${channelName}\n`;
+          statusText += `📝 Última publicación ID: ${lastPublishedPostId || 'Ninguna'}\n`;
+          statusText += `⏱️ Intervalo: ${CHECK_INTERVAL_MINUTES} minuto(s)\n`;
+          statusText += `🔄 Verificando: ${isCheckingInstagram ? 'Sí' : 'No'}`;
+
+          await interaction.reply({
+            content: statusText,
+            ephemeral: true
+          });
+        } catch (err) {
+          console.error('Error en comando status:', err?.message || err);
+          await interaction.reply({
+            content: '❌ Error al obtener estado.',
             ephemeral: true
           });
         }
