@@ -18,7 +18,21 @@ if (!TOKEN) {
   process.exit(1);
 }
 
-const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent] });
+
+function getUnpostedPosts(posts) {
+  if (!Array.isArray(posts) || posts.length === 0) return [];
+  if (!lastPublishedPostId) return posts;
+
+  const result = [];
+  for (const p of posts) {
+    if (!p || !p.id) continue;
+    if (p.id === lastPublishedPostId) break;
+    result.push(p);
+  }
+
+  return result;
+}
 
 let lastPublishedPostId = null;
 let isCheckingInstagram = false;
@@ -241,6 +255,39 @@ client.once('ready', async () => {
       console.error('Error comprobando Instagram:', error.message);
     }
   }, intervalMs);
+});
+
+// Comando de texto: !traerultimas
+client.on('messageCreate', async (message) => {
+  try {
+    if (!message.guild) return;
+    if (message.author?.bot) return;
+
+    const text = String(message.content || '').trim().toLowerCase();
+    if (text !== '!traerultimas') return;
+
+    await message.channel.send('Obteniendo publicaciones de Instagram...');
+
+    const posts = await fetchProfilePosts();
+    const unposted = getUnpostedPosts(posts);
+
+    if (!unposted || unposted.length === 0) {
+      await message.channel.send('No hay nuevas publicaciones sin subir.');
+      return;
+    }
+
+    // Enviar hasta 5 publicaciones pendientes para evitar spamear
+    const toSend = unposted.slice(0, 5);
+    for (const p of toSend) {
+      const embed = createPostEmbed(p);
+      const postUrl = p.permalink || buildInstagramPostUrl(p.shortcode);
+      const components = createPostButtonRow(postUrl);
+      await message.channel.send({ content: postUrl, embeds: [embed], components });
+    }
+  } catch (err) {
+    console.error('Error en comando !traerultimas:', err?.message || err);
+    try { await message.channel.send('Error al obtener publicaciones.'); } catch {};
+  }
 });
 
 client.login(TOKEN);
