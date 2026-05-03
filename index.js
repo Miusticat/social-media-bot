@@ -1,16 +1,17 @@
 require('dotenv').config();
 const fs = require('fs/promises');
 const path = require('path');
-const { Client, GatewayIntentBits, EmbedBuilder, ChannelType } = require('discord.js');
+const { Client, GatewayIntentBits, EmbedBuilder, ChannelType, REST, Routes, SlashCommandBuilder } = require('discord.js');
 
 const TOKEN = process.env.DISCORD_TOKEN;
 const INSTAGRAM_USERNAME = process.env.INSTAGRAM_USERNAME || 'gtaworld_es_oficial';
 const INSTAGRAM_MEDIA_API_URL = process.env.INSTAGRAM_MEDIA_API_URL || '';
 const INSTAGRAM_ACCESS_TOKEN = process.env.INSTAGRAM_ACCESS_TOKEN || '';
-const DISCORD_CHANNEL_ID = process.env.DISCORD_CHANNEL_ID || '1455996281272012932';
+const DISCORD_CHANNEL_ID_DEFAULT = process.env.DISCORD_CHANNEL_ID || '1455996281272012932';
 const CHECK_INTERVAL_MINUTES = Number(process.env.CHECK_INTERVAL_MINUTES || 1);
 const POST_ON_STARTUP = String(process.env.POST_ON_STARTUP || 'false').toLowerCase() === 'true';
 const STATE_FILE = path.resolve(process.env.STATE_FILE || '.ig-state.json');
+const CONFIG_FILE = path.resolve('.ig-config.json');
 const BUTTON_LABEL = 'IR A LA PUBLICACIÓN';
 
 if (!TOKEN) {
@@ -19,6 +20,7 @@ if (!TOKEN) {
 }
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent] });
+let DISCORD_CHANNEL_ID = DISCORD_CHANNEL_ID_DEFAULT;
 
 function getUnpostedPosts(posts) {
   if (!Array.isArray(posts) || posts.length === 0) return [];
@@ -50,6 +52,47 @@ async function loadState() {
 async function saveState() {
   const payload = { lastPublishedPostId };
   await fs.writeFile(STATE_FILE, JSON.stringify(payload, null, 2), 'utf-8');
+}
+
+async function loadConfig() {
+  try {
+    const raw = await fs.readFile(CONFIG_FILE, 'utf-8');
+    const parsed = JSON.parse(raw);
+    if (parsed.channelId) {
+      DISCORD_CHANNEL_ID = parsed.channelId;
+    }
+  } catch {
+    DISCORD_CHANNEL_ID = DISCORD_CHANNEL_ID_DEFAULT;
+  }
+}
+
+async function saveConfig() {
+  const payload = { channelId: DISCORD_CHANNEL_ID };
+  await fs.writeFile(CONFIG_FILE, JSON.stringify(payload, null, 2), 'utf-8');
+}
+
+async function registerCommands() {
+  const commands = [
+    new SlashCommandBuilder()
+      .setName('setchannel')
+      .setDescription('Establece el canal donde se publicarán las nuevas publicaciones de Instagram')
+      .addChannelOption(option =>
+        option
+          .setName('canal')
+          .setDescription('El canal de Discord donde publicar')
+          .setRequired(true)
+          .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
+      )
+      .toJSON()
+  ];
+
+  try {
+    const rest = new REST({ version: '10' }).setToken(TOKEN);
+    const data = await rest.put(Routes.applicationCommands(client.user.id), { body: commands });
+    console.log(`✅ Se registraron ${data.length} comandos de aplicación globales.`);
+  } catch (error) {
+    console.error('Error registrando comandos:', error.message);
+  }
 }
 
 function normalizePost(node) {
@@ -237,9 +280,12 @@ async function checkInstagram({ isInitialCheck = false } = {}) {
 client.once('ready', async () => {
   console.log(`Bot conectado como ${client.user.tag}`);
   console.log(`Monitoreando Instagram: @${INSTAGRAM_USERNAME}`);
-  console.log(`Canal destino: ${DISCORD_CHANNEL_ID}`);
 
   await loadState();
+  await loadConfig();
+  await registerCommands();
+
+  console.log(`Canal destino: ${DISCORD_CHANNEL_ID}`);
 
   try {
     await checkInstagram({ isInitialCheck: true });
@@ -255,6 +301,43 @@ client.once('ready', async () => {
       console.error('Error comprobando Instagram:', error.message);
     }
   }, intervalMs);
+});
+
+// Manejador de interacciones (comandos slash)
+client.on('interactionCreate', async (interaction) => {
+  if (!interaction.isChatInputCommand()) return;
+
+  try {
+    if (interaction.commandName === 'setchannel') {
+      const channel = interaction.options.getChannel('canal');
+
+      // Verificar permisos del usuario (solo administradores)
+      if (!interaction.member.permissions.has('Administrator')) {
+        return await interaction.reply({
+          content: '❌ Solo administradores pueden usar este comando.',
+          ephemeral: true
+        });
+      }
+
+      DISCORD_CHANNEL_ID = channel.id;
+      await saveConfig();
+
+      await interaction.reply({
+        content: `✅ Canal de publicación cambiado a <#${channel.id}>`,
+        ephemeral: true
+      });
+
+      console.log(`Canal de publicación actualizado a: ${channel.id} (${channel.name})`);
+    }
+  } catch (error) {
+    console.error('Error procesando interacción:', error.message);
+    try {
+      await interaction.reply({
+        content: '❌ Hubo un error procesando el comando.',
+        ephemeral: true
+      });
+    } catch {}
+  }
 });
 
 // Comando de texto: !traerultimas
