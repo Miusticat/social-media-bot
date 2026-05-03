@@ -1,7 +1,7 @@
 require('dotenv').config();
 const fs = require('fs/promises');
 const path = require('path');
-const { Client, GatewayIntentBits, EmbedBuilder, ChannelType, REST, Routes, SlashCommandBuilder, ActionRowBuilder, StringSelectMenuBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { Client, GatewayIntentBits, EmbedBuilder, ChannelType, REST, Routes, SlashCommandBuilder, ActionRowBuilder, StringSelectMenuBuilder, ButtonBuilder, ButtonStyle, MessageFlags } = require('discord.js');
 
 const TOKEN = process.env.DISCORD_TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
@@ -306,7 +306,7 @@ async function checkInstagram({ isInitialCheck = false } = {}) {
   }
 }
 
-client.once('ready', async () => {
+client.once('clientReady', async () => {
   console.log(`Bot conectado como ${client.user.tag}`);
   console.log(`Monitoreando Instagram: @${INSTAGRAM_USERNAME}`);
 
@@ -344,7 +344,7 @@ client.on('interactionCreate', async (interaction) => {
         if (!interaction.member.permissions.has('Administrator')) {
           return await interaction.reply({
             content: '❌ Solo administradores pueden usar este comando.',
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
           });
         }
 
@@ -353,7 +353,7 @@ client.on('interactionCreate', async (interaction) => {
 
         await interaction.reply({
           content: `✅ Canal de publicación cambiado a <#${channel.id}>`,
-          ephemeral: true
+          flags: MessageFlags.Ephemeral
         });
 
         console.log(`Canal de publicación actualizado a: ${channel.id} (${channel.name})`);
@@ -364,11 +364,11 @@ client.on('interactionCreate', async (interaction) => {
         if (!interaction.member.permissions.has('Administrator')) {
           return await interaction.reply({
             content: '❌ Solo administradores pueden usar este comando.',
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
           });
         }
 
-        await interaction.deferReply({ ephemeral: true });
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
         try {
           const posts = await fetchProfilePosts();
@@ -383,11 +383,22 @@ client.on('interactionCreate', async (interaction) => {
           }
 
           // Crear opciones del select menu (máximo 25)
-          const selectOptions = unposted.slice(0, 25).map((post, index) => ({
-            label: `${index + 1}. ${post.caption.slice(0, 100)}${post.caption.length > 100 ? '...' : ''}`,
-            value: post.id,
-            description: `${new Date(post.takenAt * 1000).toLocaleDateString()} - ${post.likes} likes`
-          }));
+          const selectOptions = unposted.slice(0, 25).map((post, index) => {
+            // Truncar label a máximo 100 caracteres
+            let captionPreview = post.caption.slice(0, 90);
+            if (post.caption.length > 90) captionPreview += '...';
+            const label = `${index + 1}. ${captionPreview}`.slice(0, 100);
+            
+            // Truncar description a máximo 100 caracteres
+            const dateStr = new Date(post.takenAt * 1000).toLocaleDateString();
+            const description = `${dateStr} • ${post.likes} likes`.slice(0, 100);
+            
+            return {
+              label,
+              value: post.id,
+              description
+            };
+          });
 
           const selectMenu = new StringSelectMenuBuilder()
             .setCustomId('select_post')
@@ -399,14 +410,15 @@ client.on('interactionCreate', async (interaction) => {
           await interaction.editReply({
             content: `📸 Hay ${unposted.length} publicaciones sin publicar. Elige una:`,
             components: [row],
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
           });
         } catch (err) {
           console.error('Error en comando publicar:', err?.message || err);
           console.error('Stack completo:', err?.stack);
           try {
             await interaction.editReply({
-              content: `❌ Error: ${err?.message || 'Error desconocido al obtener publicaciones.'}`
+              content: `❌ Error: ${err?.message || 'Error desconocido al obtener publicaciones.'}`,
+              flags: MessageFlags.Ephemeral
             });
           } catch {}
         }
@@ -417,7 +429,7 @@ client.on('interactionCreate', async (interaction) => {
         if (!interaction.member.permissions.has('Administrator')) {
           return await interaction.reply({
             content: '❌ Solo administradores pueden usar este comando.',
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
           });
         }
 
@@ -427,7 +439,7 @@ client.on('interactionCreate', async (interaction) => {
 
           await interaction.reply({
             content: '✅ Estado resetado. Ahora se mostrarán todas las publicaciones nuevamente.',
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
           });
 
           console.log(`Estado resetado - lastPublishedPostId: null`);
@@ -435,7 +447,7 @@ client.on('interactionCreate', async (interaction) => {
           console.error('Error reseteando estado:', err?.message || err);
           await interaction.reply({
             content: '❌ Error al resetear el estado.',
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
           });
         }
       }
@@ -455,13 +467,13 @@ client.on('interactionCreate', async (interaction) => {
 
           await interaction.reply({
             content: statusText,
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
           });
         } catch (err) {
           console.error('Error en comando status:', err?.message || err);
           await interaction.reply({
             content: '❌ Error al obtener estado.',
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
           });
         }
       }
@@ -569,7 +581,7 @@ client.on('interactionCreate', async (interaction) => {
       } else {
         await interaction.reply({
           content: '❌ Hubo un error procesando tu solicitud.',
-          ephemeral: true
+          flags: MessageFlags.Ephemeral
         });
       }
     } catch {}
