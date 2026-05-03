@@ -1,7 +1,7 @@
 require('dotenv').config();
 const fs = require('fs/promises');
 const path = require('path');
-const { Client, GatewayIntentBits, EmbedBuilder, ChannelType, REST, Routes, SlashCommandBuilder } = require('discord.js');
+const { Client, GatewayIntentBits, EmbedBuilder, ChannelType, REST, Routes, SlashCommandBuilder, ActionRowBuilder, StringSelectMenuBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 
 const TOKEN = process.env.DISCORD_TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
@@ -90,6 +90,10 @@ async function registerCommands() {
           .setRequired(true)
           .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
       )
+      .toJSON(),
+    new SlashCommandBuilder()
+      .setName('publicar')
+      .setDescription('Verifica y elige una publicación de Instagram para publicar')
       .toJSON()
   ];
 
@@ -318,39 +322,187 @@ client.once('ready', async () => {
   }, intervalMs);
 });
 
-// Manejador de interacciones (comandos slash)
+// Manejador de interacciones (comandos slash, select menus, botones)
 client.on('interactionCreate', async (interaction) => {
-  if (!interaction.isChatInputCommand()) return;
-
   try {
-    if (interaction.commandName === 'setchannel') {
-      const channel = interaction.options.getChannel('canal');
+    // Comandos slash
+    if (interaction.isChatInputCommand()) {
+      if (interaction.commandName === 'setchannel') {
+        const channel = interaction.options.getChannel('canal');
 
-      // Verificar permisos del usuario (solo administradores)
-      if (!interaction.member.permissions.has('Administrator')) {
-        return await interaction.reply({
-          content: '❌ Solo administradores pueden usar este comando.',
+        // Verificar permisos del usuario (solo administradores)
+        if (!interaction.member.permissions.has('Administrator')) {
+          return await interaction.reply({
+            content: '❌ Solo administradores pueden usar este comando.',
+            ephemeral: true
+          });
+        }
+
+        DISCORD_CHANNEL_ID = channel.id;
+        await saveConfig();
+
+        await interaction.reply({
+          content: `✅ Canal de publicación cambiado a <#${channel.id}>`,
           ephemeral: true
         });
+
+        console.log(`Canal de publicación actualizado a: ${channel.id} (${channel.name})`);
       }
 
-      DISCORD_CHANNEL_ID = channel.id;
-      await saveConfig();
+      if (interaction.commandName === 'publicar') {
+        // Verificar permisos del usuario (solo administradores)
+        if (!interaction.member.permissions.has('Administrator')) {
+          return await interaction.reply({
+            content: '❌ Solo administradores pueden usar este comando.',
+            ephemeral: true
+          });
+        }
 
-      await interaction.reply({
-        content: `✅ Canal de publicación cambiado a <#${channel.id}>`,
-        ephemeral: true
-      });
+        await interaction.deferReply({ ephemeral: true });
 
-      console.log(`Canal de publicación actualizado a: ${channel.id} (${channel.name})`);
+        try {
+          const posts = await fetchProfilePosts();
+          const unposted = getUnpostedPosts(posts);
+
+          if (!unposted || unposted.length === 0) {
+            return await interaction.editReply({
+              content: '📭 No hay nuevas publicaciones sin publicar.'
+            });
+          }
+
+          // Crear opciones del select menu (máximo 25)
+          const selectOptions = unposted.slice(0, 25).map((post, index) => ({
+            label: `${index + 1}. ${post.caption.slice(0, 100)}${post.caption.length > 100 ? '...' : ''}`,
+            value: post.id,
+            description: `${new Date(post.takenAt * 1000).toLocaleDateString()} - ${post.likes} likes`
+          }));
+
+          const selectMenu = new StringSelectMenuBuilder()
+            .setCustomId('select_post')
+            .setPlaceholder('Elige una publicación para ver preview')
+            .addOptions(selectOptions);
+
+          const row = new ActionRowBuilder().addComponents(selectMenu);
+
+          await interaction.editReply({
+            content: `📸 Hay ${unposted.length} publicaciones sin publicar. Elige una:`,
+            components: [row],
+            ephemeral: true
+          });
+        } catch (err) {
+          console.error('Error en comando publicar:', err?.message || err);
+          await interaction.editReply({
+            content: '❌ Error al obtener publicaciones.'
+          });
+        }
+      }
+    }
+
+    // Select menu para elegir publicación
+    if (interaction.isStringSelectMenu()) {
+      if (interaction.customId === 'select_post') {
+        await interaction.deferUpdate();
+
+        try {
+          const postId = interaction.values[0];
+          const posts = await fetchProfilePosts();
+          const post = posts.find(p => p.id === postId);
+
+          if (!post) {
+            return await interaction.editReply({
+              content: '❌ No se encontró la publicación.',
+              components: []
+            });
+          }
+
+          // Crear embed con preview
+          const embed = createPostEmbed(post);
+          const postUrl = buildInstagramPostUrl(post.shortcode);
+
+          // Botón para publicar
+          const publishButton = new ButtonBuilder()
+            .setCustomId(`publish_${post.id}`)
+            .setLabel('✅ Publicar ahora')
+            .setStyle(ButtonStyle.Success);
+
+          const cancelButton = new ButtonBuilder()
+            .setCustomId('cancel_publish')
+            .setLabel('❌ Cancelar')
+            .setStyle(ButtonStyle.Danger);
+
+          const buttonRow = new ActionRowBuilder().addComponents(publishButton, cancelButton);
+
+          await interaction.editReply({
+            content: `**Preview de la publicación:**`,
+            embeds: [embed],
+            components: [buttonRow]
+          });
+        } catch (err) {
+          console.error('Error en select menu:', err?.message || err);
+          await interaction.editReply({
+            content: '❌ Error procesando la selección.'
+          });
+        }
+      }
+    }
+
+    // Botones (publicar o cancelar)
+    if (interaction.isButton()) {
+      if (interaction.customId.startsWith('publish_')) {
+        const postId = interaction.customId.replace('publish_', '');
+        await interaction.deferUpdate();
+
+        try {
+          const posts = await fetchProfilePosts();
+          const post = posts.find(p => p.id === postId);
+
+          if (!post) {
+            return await interaction.editReply({
+              content: '❌ No se encontró la publicación.',
+              components: []
+            });
+          }
+
+          // Publicar en el canal
+          await postToDiscord(post);
+          lastPublishedPostId = post.id;
+          await saveState();
+
+          await interaction.editReply({
+            content: `✅ Publicación enviada a <#${DISCORD_CHANNEL_ID}> con éxito!`,
+            components: []
+          });
+
+          console.log(`Publicación manual enviada: ${post.id}`);
+        } catch (err) {
+          console.error('Error publicando:', err?.message || err);
+          await interaction.editReply({
+            content: '❌ Error al publicar.',
+            components: []
+          });
+        }
+      }
+
+      if (interaction.customId === 'cancel_publish') {
+        await interaction.editReply({
+          content: '❌ Operación cancelada.',
+          components: []
+        });
+      }
     }
   } catch (error) {
     console.error('Error procesando interacción:', error.message);
     try {
-      await interaction.reply({
-        content: '❌ Hubo un error procesando el comando.',
-        ephemeral: true
-      });
+      if (interaction.replied || interaction.deferred) {
+        await interaction.editReply({
+          content: '❌ Hubo un error procesando tu solicitud.'
+        });
+      } else {
+        await interaction.reply({
+          content: '❌ Hubo un error procesando tu solicitud.',
+          ephemeral: true
+        });
+      }
     } catch {}
   }
 });
