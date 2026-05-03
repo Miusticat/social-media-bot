@@ -33,14 +33,8 @@ function getUnpostedPosts(posts) {
   if (!Array.isArray(posts) || posts.length === 0) return [];
   if (!lastPublishedPostId) return posts;
 
-  const result = [];
-  for (const p of posts) {
-    if (!p || !p.id) continue;
-    if (p.id === lastPublishedPostId) break;
-    result.push(p);
-  }
-
-  return result;
+  // Retorna todos los posts excepto el que ya fue publicado
+  return posts.filter(p => p && p.id && p.id !== lastPublishedPostId);
 }
 
 let lastPublishedPostId = null;
@@ -94,6 +88,10 @@ async function registerCommands() {
     new SlashCommandBuilder()
       .setName('publicar')
       .setDescription('Verifica y elige una publicación de Instagram para publicar')
+      .toJSON(),
+    new SlashCommandBuilder()
+      .setName('resetstate')
+      .setDescription('Resetea el estado de publicaciones (muestra todas nuevamente)')
       .toJSON()
   ];
 
@@ -364,6 +362,8 @@ client.on('interactionCreate', async (interaction) => {
           const posts = await fetchProfilePosts();
           const unposted = getUnpostedPosts(posts);
 
+          console.log(`Comando /publicar: ${posts.length} posts totales, ${unposted?.length || 0} sin publicar`);
+
           if (!unposted || unposted.length === 0) {
             return await interaction.editReply({
               content: '📭 No hay nuevas publicaciones sin publicar.'
@@ -393,6 +393,34 @@ client.on('interactionCreate', async (interaction) => {
           console.error('Error en comando publicar:', err?.message || err);
           await interaction.editReply({
             content: '❌ Error al obtener publicaciones.'
+          });
+        }
+      }
+
+      if (interaction.commandName === 'resetstate') {
+        // Verificar permisos del usuario (solo administradores)
+        if (!interaction.member.permissions.has('Administrator')) {
+          return await interaction.reply({
+            content: '❌ Solo administradores pueden usar este comando.',
+            ephemeral: true
+          });
+        }
+
+        try {
+          lastPublishedPostId = null;
+          await saveState();
+
+          await interaction.reply({
+            content: '✅ Estado resetado. Ahora se mostrarán todas las publicaciones nuevamente.',
+            ephemeral: true
+          });
+
+          console.log(`Estado resetado - lastPublishedPostId: null`);
+        } catch (err) {
+          console.error('Error reseteando estado:', err?.message || err);
+          await interaction.reply({
+            content: '❌ Error al resetear el estado.',
+            ephemeral: true
           });
         }
       }
