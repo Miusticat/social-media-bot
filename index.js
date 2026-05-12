@@ -17,6 +17,7 @@ const POST_ON_STARTUP = String(process.env.POST_ON_STARTUP || 'false').toLowerCa
 const STATE_FILE = path.resolve(process.env.STATE_FILE || '.ig-state.json');
 const CONFIG_FILE = path.resolve('.ig-config.json');
 const TIKTOK_CONFIG_FILE = path.resolve('.tt-config.json');
+const POSTS_STATE_FILE = path.resolve(process.env.POSTS_STATE_FILE || '.ig-posts.json');
 const BUTTON_LABEL = 'IR A LA PUBLICACIÓN';
 
 if (!TOKEN) {
@@ -57,6 +58,27 @@ async function loadState() {
 async function saveState() {
   const payload = { lastPublishedPostId };
   await fs.writeFile(STATE_FILE, JSON.stringify(payload, null, 2), 'utf-8');
+}
+
+// Persist mapping between instagram post id and discord message
+async function loadPostedMessages() {
+  try {
+    const raw = await fs.readFile(POSTS_STATE_FILE, 'utf-8');
+    const parsed = JSON.parse(raw);
+    return parsed || {};
+  } catch {
+    return {};
+  }
+}
+
+async function savePostedMessages(map) {
+  await fs.writeFile(POSTS_STATE_FILE, JSON.stringify(map, null, 2), 'utf-8');
+}
+
+async function markPostMessage(postId, channelId, messageId, postPermalink) {
+  const map = await loadPostedMessages();
+  map[postId] = { channelId, messageId, permalink: postPermalink || '' };
+  await savePostedMessages(map);
 }
 
 async function loadConfig() {
@@ -301,7 +323,59 @@ async function postToDiscord(post) {
   const embed = createPostEmbed(post);
   const components = createPostButtonRow(postUrl);
 
-  await channel.send({ content: postUrl, embeds: [embed], components });
+  const sent = await channel.send({ content: postUrl, embeds: [embed], components });
+  try {
+    const permalink = post.permalink || postUrl;
+    await markPostMessage(post.id, channel.id, sent.id, permalink);
+  } catch (err) {
+    console.error('Error guardando mapping de post->mensaje:', err?.message || err);
+  }
+}
+
+async function updatePublishedMessages() {
+  try {
+    const map = await loadPostedMessages();
+    const ids = Object.keys(map || {});
+    if (ids.length === 0) return;
+
+    const posts = await fetchProfilePosts();
+    if (!posts || posts.length === 0) return;
+
+    for (const postId of ids) {
+      try {
+        const entry = map[postId];
+        if (!entry) continue;
+
+        const post = posts.find(p => p.id === postId);
+        if (!post) continue; // quizá no está en la respuesta (antiguo)
+
+        const channel = await client.channels.fetch(entry.channelId).catch(() => null);
+        if (!channel) continue;
+
+        const message = await channel.messages.fetch(entry.messageId).catch(() => null);
+        if (!message) continue;
+
+        const newEmbed = createPostEmbed(post);
+        const postUrl = post.permalink || buildInstagramPostUrl(post.shortcode);
+        const components = createPostButtonRow(postUrl);
+
+        // Compare fields to avoid unnecessary edits
+        const oldLikes = message.embeds?.[0]?.fields?.find(f => f.name === 'Likes')?.value || '';
+        const oldComments = message.embeds?.[0]?.fields?.find(f => f.name === 'Comentarios')?.value || '';
+        if (oldLikes === String(post.likes) && oldComments === String(post.comments)) {
+          continue;
+        }
+
+        await message.edit({ content: postUrl, embeds: [newEmbed], components }).catch(err => {
+          console.error('Error editando mensaje publicado:', err?.message || err);
+        });
+      } catch (err) {
+        console.error('Error procesando actualización de mensaje publicado:', err?.message || err);
+      }
+    }
+  } catch (err) {
+    console.error('Error en updatePublishedMessages:', err?.message || err);
+  }
 }
 
 async function checkInstagram({ isInitialCheck = false } = {}) {
@@ -360,6 +434,8 @@ client.once('clientReady', async () => {
   try {
     await checkInstagram({ isInitialCheck: true });
     await tiktok.checkTikTok(client, TIKTOK_CHANNEL_ID);
+    // Actualizar embeds de publicaciones ya enviadas (likes/comentarios)
+    await updatePublishedMessages();
   } catch (error) {
     console.error('Error en la verificación inicial:', error.message);
   }
@@ -371,6 +447,15 @@ client.once('clientReady', async () => {
       await checkInstagram();
     } catch (error) {
       console.error('Error comprobando Instagram:', error.message);
+    }
+  }, igIntervalMs);
+
+  // Intervalo para actualizar los likes/comentarios en los mensajes publicados
+  setInterval(async () => {
+    try {
+      await updatePublishedMessages();
+    } catch (err) {
+      console.error('Error actualizando publicaciones publicadas:', err?.message || err);
     }
   }, igIntervalMs);
 
