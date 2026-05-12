@@ -74,6 +74,10 @@ async function loadPostedMessages() {
   }
 }
 
+function getInstagramChannelIdForGuild(guildId) {
+  return CHANNELS_MAP[guildId] || DISCORD_CHANNEL_ID;
+}
+
 async function savePostedMessages(map) {
   await fs.writeFile(POSTS_STATE_FILE, JSON.stringify(map, null, 2), 'utf-8');
 }
@@ -106,6 +110,12 @@ async function loadConfig() {
 async function saveConfig() {
   const payload = { channelId: DISCORD_CHANNEL_ID, channels: CHANNELS_MAP };
   await fs.writeFile(CONFIG_FILE, JSON.stringify(payload, null, 2), 'utf-8');
+}
+
+async function hasPostBeenSentToChannel(postId, channelId) {
+  const map = await loadPostedMessages();
+  const entries = map?.[postId] || [];
+  return entries.some(entry => entry.channelId === channelId);
 }
 
 async function loadTikTokConfig() {
@@ -156,6 +166,14 @@ async function registerCommands() {
     new SlashCommandBuilder()
       .setName('publicartiktok')
       .setDescription('Verifica y elige una publicación de TikTok para publicar')
+      .toJSON(),
+    new SlashCommandBuilder()
+      .setName('publicartodoig')
+      .setDescription('Publica todas las publicaciones de Instagram disponibles')
+      .toJSON(),
+    new SlashCommandBuilder()
+      .setName('publicartodotiktok')
+      .setDescription('Publica todos los videos de TikTok disponibles')
       .toJSON(),
     new SlashCommandBuilder()
       .setName('resetstate')
@@ -391,7 +409,8 @@ async function updatePublishedMessages() {
             if (!already) {
               await markPostMessage(post.id, guildId, channel.id, existing.id, permalink);
               // refresh local postedMap
-              postedMap[post.id] = await loadPostedMessages()[post.id];
+              const refreshedMap = await loadPostedMessages();
+              postedMap[post.id] = refreshedMap[post.id] || [];
             }
           }
         }
@@ -431,6 +450,97 @@ async function updatePublishedMessages() {
     }
   } catch (err) {
     console.error('Error en updatePublishedMessages:', err?.message || err);
+  }
+}
+
+async function publishAllInstagramPosts(interaction) {
+  if (!interaction.member.permissions.has('Administrator')) {
+    return await interaction.reply({
+      content: '❌ Solo administradores pueden usar este comando.',
+      flags: MessageFlags.Ephemeral
+    });
+  }
+
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+  try {
+    const posts = await fetchProfilePosts();
+    if (!posts || posts.length === 0) {
+      return await interaction.editReply({
+        content: '📭 No se pudieron obtener publicaciones de Instagram.'
+      });
+    }
+
+    const orderedPosts = [...posts].reverse();
+    const channelId = getInstagramChannelIdForGuild(interaction.guildId);
+    let publishedCount = 0;
+    let skippedCount = 0;
+
+    for (const post of orderedPosts) {
+      if (await hasPostBeenSentToChannel(post.id, channelId)) {
+        skippedCount += 1;
+        continue;
+      }
+
+      await postToDiscord(post, { targetGuildId: interaction.guildId });
+      publishedCount += 1;
+    }
+
+    if (posts[0]) {
+      lastPublishedPostId = posts[0].id;
+      await saveState();
+    }
+
+    await interaction.editReply({
+      content: `✅ Instagram: publicadas ${publishedCount} publicaciones${skippedCount ? `, ${skippedCount} omitidas por duplicadas` : ''}.`
+    });
+  } catch (err) {
+    console.error('Error en comando publicartodoig:', err?.message || err);
+    await interaction.editReply({
+      content: `❌ Error al publicar todas las publicaciones de Instagram: ${err?.message || 'Error desconocido.'}`
+    });
+  }
+}
+
+async function publishAllTikTokVideos(interaction) {
+  if (!interaction.member.permissions.has('Administrator')) {
+    return await interaction.reply({
+      content: '❌ Solo administradores pueden usar este comando.',
+      flags: MessageFlags.Ephemeral
+    });
+  }
+
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+  try {
+    const videos = await tiktok.fetchTikTokVideos();
+    if (!videos || videos.length === 0) {
+      return await interaction.editReply({
+        content: '📭 No se pudieron obtener videos de TikTok.'
+      });
+    }
+
+    const orderedVideos = [...videos].reverse();
+    const channelId = TIKTOK_CHANNEL_ID;
+    let publishedCount = 0;
+
+    for (const video of orderedVideos) {
+      await tiktok.postTikTokToDiscord(client, channelId, video);
+      publishedCount += 1;
+    }
+
+    if (videos[0]) {
+      await tiktok.markTikTokAsPublished(videos[0].id);
+    }
+
+    await interaction.editReply({
+      content: `✅ TikTok: publicados ${publishedCount} videos.`
+    });
+  } catch (err) {
+    console.error('Error en comando publicartodotiktok:', err?.message || err);
+    await interaction.editReply({
+      content: `❌ Error al publicar todos los videos de TikTok: ${err?.message || 'Error desconocido.'}`
+    });
   }
 }
 
@@ -710,6 +820,14 @@ client.on('interactionCreate', async (interaction) => {
             });
           } catch {}
         }
+      }
+
+      if (interaction.commandName === 'publicartodoig') {
+        await publishAllInstagramPosts(interaction);
+      }
+
+      if (interaction.commandName === 'publicartodotiktok') {
+        await publishAllTikTokVideos(interaction);
       }
 
       if (interaction.commandName === 'resetstate') {

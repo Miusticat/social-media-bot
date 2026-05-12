@@ -93,6 +93,8 @@ STATE_FILE=.ig-state.json
 - `/settiktokchannel`: cambia el canal de TikTok.
 - `/publicar`: selecciona una publicación de Instagram y la publica manualmente.
 - `/publicartiktok`: selecciona un video de TikTok y lo publica manualmente.
+- `/publicartodoig`: publica todas las publicaciones de Instagram disponibles.
+- `/publicartodotiktok`: publica todos los videos de TikTok disponibles.
 
 ## Uso
 
