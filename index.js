@@ -555,6 +555,13 @@ client.on('interactionCreate', async (interaction) => {
           console.error('Error en comando publicartiktok:', err?.message || err);
           console.error('Stack completo:', err?.stack);
           try {
+            if (err?.code === 'TIKTOK_API_UNAVAILABLE') {
+              return await interaction.editReply({
+                content: `⚠️ TikTok no está disponible: ${err.message}`,
+                flags: MessageFlags.Ephemeral
+              });
+            }
+
             await interaction.editReply({
               content: `❌ Error: ${err?.message || 'Error desconocido al obtener videos de TikTok.'}`,
               flags: MessageFlags.Ephemeral
@@ -660,7 +667,9 @@ client.on('interactionCreate', async (interaction) => {
         } catch (err) {
           console.error('Error en select menu de TikTok:', err?.message || err);
           await interaction.editReply({
-            content: '❌ Error procesando la selección de TikTok.'
+            content: err?.code === 'TIKTOK_API_UNAVAILABLE'
+              ? `⚠️ TikTok no está disponible: ${err.message}`
+              : '❌ Error procesando la selección de TikTok.'
           });
         }
       }
@@ -740,7 +749,9 @@ client.on('interactionCreate', async (interaction) => {
         } catch (err) {
           console.error('Error publicando TikTok:', err?.message || err);
           await interaction.editReply({
-            content: '❌ Error al publicar el video de TikTok.',
+            content: err?.code === 'TIKTOK_API_UNAVAILABLE'
+              ? `⚠️ TikTok no está disponible: ${err.message}`
+              : '❌ Error al publicar el video de TikTok.',
             components: []
           });
         }

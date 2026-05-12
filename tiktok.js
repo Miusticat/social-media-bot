@@ -4,9 +4,39 @@ const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType 
 
 const STATE_FILE_TT = path.resolve('.tt-state.json');
 let lastVideoId = null;
+let lastTikTokSourceWarning = null;
 
 function getTikTokUsername() {
   return process.env.TIKTOK_USERNAME || 'gtaworld_es_oficial';
+}
+
+function getTikTokMediaApiUrl() {
+  if (process.env.TIKTOK_MEDIA_API_URL) {
+    return process.env.TIKTOK_MEDIA_API_URL;
+  }
+
+  const username = getTikTokUsername();
+  return `https://tiktok-scraper-api.p.rapidapi.com/user/posts?username=${encodeURIComponent(username)}`;
+}
+
+function getTikTokApiHeaders() {
+  const headers = {
+    accept: 'application/json'
+  };
+
+  if (process.env.TIKTOK_MEDIA_API_KEY) {
+    headers['X-RapidAPI-Key'] = process.env.TIKTOK_MEDIA_API_KEY;
+  } else if (process.env.RAPIDAPI_KEY) {
+    headers['X-RapidAPI-Key'] = process.env.RAPIDAPI_KEY;
+  }
+
+  if (process.env.TIKTOK_RAPIDAPI_HOST) {
+    headers['X-RapidAPI-Host'] = process.env.TIKTOK_RAPIDAPI_HOST;
+  } else {
+    headers['X-RapidAPI-Host'] = 'tiktok-scraper-api.p.rapidapi.com';
+  }
+
+  return headers;
 }
 
 function buildTikTokPostUrl(video) {
@@ -84,25 +114,27 @@ function createTikTokButtonRow(videoUrl) {
 }
 
 async function fetchTikTokVideos() {
-  const username = getTikTokUsername();
-
-  if (!process.env.RAPIDAPI_KEY) {
-    throw new Error('Falta RAPIDAPI_KEY en el entorno.');
-  }
-
-  const url = `https://tiktok-scraper-api.p.rapidapi.com/user/posts?username=${encodeURIComponent(username)}`;
+  const url = getTikTokMediaApiUrl();
   const options = {
     method: 'GET',
-    headers: {
-      'X-RapidAPI-Key': process.env.RAPIDAPI_KEY,
-      'X-RapidAPI-Host': 'tiktok-scraper-api.p.rapidapi.com'
-    }
+    headers: getTikTokApiHeaders()
   };
 
   const response = await fetch(url, options);
   if (!response.ok) {
     const body = await response.text().catch(() => '');
-    throw new Error(`TikTok API respondio ${response.status}: ${body.slice(0, 180)}`);
+    const trimmedBody = body.slice(0, 180);
+
+    if (response.status === 404 || /API doesn't exists/i.test(trimmedBody)) {
+      const error = new Error(
+        'La fuente de TikTok no existe o el endpoint configurado es incorrecto. Define TIKTOK_MEDIA_API_URL y TIKTOK_RAPIDAPI_HOST con un servicio válido.'
+      );
+      error.code = 'TIKTOK_API_UNAVAILABLE';
+      error.details = trimmedBody;
+      throw error;
+    }
+
+    throw new Error(`TikTok API respondio ${response.status}: ${trimmedBody}`);
   }
 
   const data = await response.json();
@@ -175,6 +207,14 @@ async function checkTikTok(client, channelId) {
       console.log(`✅ TikTok Scraper: Nuevo video publicado ${latest.id}`);
     }
   } catch (error) {
+    if (error?.code === 'TIKTOK_API_UNAVAILABLE') {
+      if (lastTikTokSourceWarning !== error.message) {
+        console.warn(`⚠️ TikTok deshabilitado temporalmente: ${error.message}`);
+        lastTikTokSourceWarning = error.message;
+      }
+      return;
+    }
+
     console.error('❌ Error en el Scraper de TikTok:', error.message);
   }
 }
