@@ -74,7 +74,7 @@ STATE_FILE=.ig-state.json
 - `INSTAGRAM_ACCESS_TOKEN`: token de acceso para la API oficial.
 - `DISCORD_CHANNEL_ID`: canal de Discord donde se publican los posts. Usa el ID de tu propio servidor.
 - `TIKTOK_USERNAME`: nombre de usuario de TikTok a monitorizar.
-- `TIKTOK_MEDIA_API_URL`: endpoint completo para leer videos de TikTok. Si lo defines, se usa en lugar del endpoint por defecto (`tiktok-scraper7.p.rapidapi.com`).
+- `TIKTOK_MEDIA_API_URL`: endpoint completo para leer videos de TikTok. Si lo defines, se usa en lugar del endpoint por defecto (`tiktok-scraper7.p.rapidapi.com/user/posts`).
 - `TIKTOK_MEDIA_API_KEY`: clave API para el endpoint configurado de TikTok.
 - `TIKTOK_RAPIDAPI_HOST`: host de RapidAPI para el endpoint configurado de TikTok. Por defecto usa `tiktok-scraper7.p.rapidapi.com`.
 - `RAPIDAPI_KEY`: clave de RapidAPI usada como fallback si no defines `TIKTOK_MEDIA_API_KEY`.
@@ -82,6 +82,7 @@ STATE_FILE=.ig-state.json
 - `CHECK_INTERVAL_MINUTES`: intervalo de revisión. Para detección rápida se recomienda `1`.
 - `POST_ON_STARTUP`: si es `true`, publica el último post al arrancar.
 - `STATE_FILE`: archivo local para guardar el último post publicado.
+- El bot consulta videos del perfil por `TIKTOK_USERNAME`; no usa la búsqueda genérica de TikTok para detectar publicaciones.
 - Si el endpoint de TikTok devuelve `404` o `API doesn't exists`, el bot lo mostrará como fuente no disponible y no romperá Instagram.
 
 ### Comandos

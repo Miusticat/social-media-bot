@@ -10,12 +10,18 @@ function getTikTokUsername() {
   return process.env.TIKTOK_USERNAME || 'gtaworld_es_oficial';
 }
 
+function isTikTokSearchUrl(url) {
+  return /\/user\/search\b/i.test(url) || /[?&]keywords=/i.test(url);
+}
+
 function getTikTokMediaApiUrl() {
-  if (process.env.TIKTOK_MEDIA_API_URL) {
-    return process.env.TIKTOK_MEDIA_API_URL;
+  const configuredUrl = String(process.env.TIKTOK_MEDIA_API_URL || '').trim();
+  if (configuredUrl && !isTikTokSearchUrl(configuredUrl)) {
+    return configuredUrl;
   }
 
-  return 'https://tiktok-scraper7.p.rapidapi.com/user/search?keywords=tiktok&count=10&cursor=0&follower_count=0&profile_type=0&other_pref=0';
+  const username = getTikTokUsername();
+  return `https://tiktok-scraper7.p.rapidapi.com/user/posts?unique_id=${encodeURIComponent(username)}&count=10&cursor=0`;
 }
 
 function getTikTokApiHeaders() {
@@ -48,11 +54,11 @@ function buildTikTokPostUrl(video) {
 function normalizeTikTokItem(item) {
   if (!item) return null;
 
-  const videoId = String(item.video_id || item.aweme_id || item.id || '');
+  const videoId = String(item.video_id || item.aweme_id || item.awemeId || item.id || item.video?.id || '');
   if (!videoId) return null;
 
-  const shareUrl = item.share_url || item.shareUrl || item.url || '';
-  const createTime = item.create_time || item.createTime || item.timestamp || null;
+  const shareUrl = item.share_url || item.shareUrl || item.url || item.video?.share_url || '';
+  const createTime = item.create_time || item.createTime || item.timestamp || item.create_time_ms || null;
 
   return {
     id: videoId,
@@ -137,15 +143,18 @@ async function fetchTikTokVideos() {
   }
 
   const data = await response.json();
-  const items = Array.isArray(data?.results)
-    ? data.results
-    : Array.isArray(data?.data)
-      ? data.data
-      : Array.isArray(data?.items)
-        ? data.items
-        : Array.isArray(data?.aweme_list)
-          ? data.aweme_list
-          : [];
+  const candidateArrays = [
+    data?.results,
+    data?.data,
+    data?.items,
+    data?.aweme_list,
+    data?.data?.aweme_list,
+    data?.data?.items,
+    data?.data?.videos,
+    data?.aweme_list?.items
+  ];
+
+  const items = candidateArrays.find((value) => Array.isArray(value)) || [];
 
   if (!Array.isArray(items) || items.length === 0) {
     return [];
