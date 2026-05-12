@@ -16,11 +16,33 @@ function isTikTokSearchUrl(url) {
 
 function getTikTokMediaApiUrl() {
   const configuredUrl = String(process.env.TIKTOK_MEDIA_API_URL || '').trim();
-  if (configuredUrl && !isTikTokSearchUrl(configuredUrl)) {
-    return configuredUrl;
+  const username = getTikTokUsername();
+
+  if (configuredUrl) {
+    try {
+      const parsedUrl = new URL(configuredUrl);
+
+      if (parsedUrl.searchParams.has('unique_id')) {
+        parsedUrl.searchParams.set('unique_id', username);
+        return parsedUrl.toString();
+      }
+
+      if (parsedUrl.searchParams.has('username')) {
+        parsedUrl.searchParams.set('username', username);
+        return parsedUrl.toString();
+      }
+
+      if (parsedUrl.searchParams.has('keywords') && isTikTokSearchUrl(configuredUrl)) {
+        parsedUrl.searchParams.set('keywords', username);
+        return parsedUrl.toString();
+      }
+
+      return configuredUrl;
+    } catch {
+      return configuredUrl;
+    }
   }
 
-  const username = getTikTokUsername();
   return `https://tiktok-scraper7.p.rapidapi.com/user/posts?unique_id=${encodeURIComponent(username)}&count=10&cursor=0`;
 }
 
