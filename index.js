@@ -16,6 +16,7 @@ const CHECK_INTERVAL_MINUTES = Number(process.env.CHECK_INTERVAL_MINUTES || 1);
 const POST_ON_STARTUP = String(process.env.POST_ON_STARTUP || 'false').toLowerCase() === 'true';
 const STATE_FILE = path.resolve(process.env.STATE_FILE || '.ig-state.json');
 const CONFIG_FILE = path.resolve('.ig-config.json');
+const CHANNELS_FILE = path.resolve(process.env.CHANNELS_FILE || '.ig-channels.json');
 const TIKTOK_CONFIG_FILE = path.resolve('.tt-config.json');
 const POSTS_STATE_FILE = path.resolve(process.env.POSTS_STATE_FILE || '.ig-posts.json');
 const BUTTON_LABEL = 'IR A LA PUBLICACIÓN';
@@ -33,6 +34,8 @@ if (!CLIENT_ID || !GUILD_ID) {
 const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent] });
 let DISCORD_CHANNEL_ID = DISCORD_CHANNEL_ID_DEFAULT;
 let TIKTOK_CHANNEL_ID = TIKTOK_CHANNEL_ID_DEFAULT;
+// guildId -> channelId mapping for Instagram posts
+let CHANNELS_MAP = {};
 
 function getUnpostedPosts(posts) {
   if (!Array.isArray(posts) || posts.length === 0) return [];
@@ -60,11 +63,12 @@ async function saveState() {
   await fs.writeFile(STATE_FILE, JSON.stringify(payload, null, 2), 'utf-8');
 }
 
-// Persist mapping between instagram post id and discord message
+// Persist mapping between instagram post id and discord messages (supports multiple postings per post)
 async function loadPostedMessages() {
   try {
     const raw = await fs.readFile(POSTS_STATE_FILE, 'utf-8');
     const parsed = JSON.parse(raw);
+    // shape: { postId: [ { guildId, channelId, messageId, permalink }, ... ] }
     return parsed || {};
   } catch {
     return {};
@@ -75,10 +79,14 @@ async function savePostedMessages(map) {
   await fs.writeFile(POSTS_STATE_FILE, JSON.stringify(map, null, 2), 'utf-8');
 }
 
-async function markPostMessage(postId, channelId, messageId, postPermalink) {
+async function markPostMessage(postId, guildId, channelId, messageId, postPermalink) {
   const map = await loadPostedMessages();
-  map[postId] = { channelId, messageId, permalink: postPermalink || '' };
-  await savePostedMessages(map);
+  if (!map[postId]) map[postId] = [];
+  const exists = map[postId].some(e => e.guildId === guildId && e.channelId === channelId && e.messageId === messageId);
+  if (!exists) {
+    map[postId].push({ guildId, channelId, messageId, permalink: postPermalink || '' });
+    await savePostedMessages(map);
+  }
 }
 
 async function loadConfig() {
@@ -88,13 +96,16 @@ async function loadConfig() {
     if (parsed.channelId) {
       DISCORD_CHANNEL_ID = parsed.channelId;
     }
+    if (parsed.channels && typeof parsed.channels === 'object') {
+      CHANNELS_MAP = parsed.channels;
+    }
   } catch {
     DISCORD_CHANNEL_ID = DISCORD_CHANNEL_ID_DEFAULT;
   }
 }
 
 async function saveConfig() {
-  const payload = { channelId: DISCORD_CHANNEL_ID };
+  const payload = { channelId: DISCORD_CHANNEL_ID, channels: CHANNELS_MAP };
   await fs.writeFile(CONFIG_FILE, JSON.stringify(payload, null, 2), 'utf-8');
 }
 
@@ -308,69 +319,115 @@ function createPostButtonRow(postUrl) {
   ];
 }
 
-async function postToDiscord(post) {
-  const channel = await client.channels.fetch(DISCORD_CHANNEL_ID).catch(() => null);
-  if (!channel) {
-    throw new Error(`No se encontro el canal ${DISCORD_CHANNEL_ID}.`);
-  }
-
-  const isTextChannel = channel.type === ChannelType.GuildText || channel.type === ChannelType.GuildAnnouncement;
-  if (!isTextChannel) {
-    throw new Error(`El canal ${DISCORD_CHANNEL_ID} no es de texto.`);
-  }
-
-  const postUrl = buildInstagramPostUrl(post.shortcode);
+async function postToDiscord(post, options = {}) {
+  // options: { targetGuildId, targetChannelId }
+  const postUrl = post.permalink || buildInstagramPostUrl(post.shortcode);
   const embed = createPostEmbed(post);
   const components = createPostButtonRow(postUrl);
 
-  const sent = await channel.send({ content: postUrl, embeds: [embed], components });
-  try {
-    const permalink = post.permalink || postUrl;
-    await markPostMessage(post.id, channel.id, sent.id, permalink);
-  } catch (err) {
-    console.error('Error guardando mapping de post->mensaje:', err?.message || err);
+  // Build targets
+  const targets = [];
+  if (options.targetChannelId) {
+    targets.push({ guildId: options.targetGuildId || null, channelId: options.targetChannelId });
+  } else if (options.targetGuildId) {
+    const ch = CHANNELS_MAP[options.targetGuildId] || DISCORD_CHANNEL_ID;
+    if (ch) targets.push({ guildId: options.targetGuildId, channelId: ch });
+  } else {
+    const all = Object.entries(CHANNELS_MAP || {});
+    if (all.length === 0 && DISCORD_CHANNEL_ID) {
+      targets.push({ guildId: null, channelId: DISCORD_CHANNEL_ID });
+    } else {
+      for (const [guildId, channelId] of all) {
+        targets.push({ guildId, channelId });
+      }
+    }
+  }
+
+  for (const t of targets) {
+    try {
+      const channel = await client.channels.fetch(t.channelId).catch(() => null);
+      if (!channel) {
+        console.warn(`No se encontro canal ${t.channelId} para guild ${t.guildId}`);
+        continue;
+      }
+      const isTextChannel = channel.type === ChannelType.GuildText || channel.type === ChannelType.GuildAnnouncement;
+      if (!isTextChannel) continue;
+
+      const sent = await channel.send({ content: postUrl, embeds: [embed], components });
+      try {
+        await markPostMessage(post.id, t.guildId || channel.guild?.id || null, channel.id, sent.id, postUrl);
+      } catch (err) {
+        console.error('Error guardando mapping de post->mensaje:', err?.message || err);
+      }
+    } catch (err) {
+      console.error('Error enviando publicación a canal:', err?.message || err);
+    }
   }
 }
 
 async function updatePublishedMessages() {
   try {
-    const map = await loadPostedMessages();
-    const ids = Object.keys(map || {});
-    if (ids.length === 0) return;
-
+    const postedMap = await loadPostedMessages();
     const posts = await fetchProfilePosts();
     if (!posts || posts.length === 0) return;
 
-    for (const postId of ids) {
+    // Ensure we can detect existing messages in configured channels even if they were posted before this update
+    const configured = Object.entries(CHANNELS_MAP || {});
+    if (configured.length === 0 && DISCORD_CHANNEL_ID) configured.push([null, DISCORD_CHANNEL_ID]);
+
+    // Scan channels to discover messages that contain post permalinks and add to postedMap if missing
+    for (const [guildId, channelId] of configured) {
       try {
-        const entry = map[postId];
-        if (!entry) continue;
-
-        const post = posts.find(p => p.id === postId);
-        if (!post) continue; // quizá no está en la respuesta (antiguo)
-
-        const channel = await client.channels.fetch(entry.channelId).catch(() => null);
+        const channel = await client.channels.fetch(channelId).catch(() => null);
         if (!channel) continue;
+        const fetched = await channel.messages.fetch({ limit: 200 }).catch(() => null);
+        if (!fetched) continue;
 
-        const message = await channel.messages.fetch(entry.messageId).catch(() => null);
-        if (!message) continue;
-
-        const newEmbed = createPostEmbed(post);
-        const postUrl = post.permalink || buildInstagramPostUrl(post.shortcode);
-        const components = createPostButtonRow(postUrl);
-
-        // Compare fields to avoid unnecessary edits
-        const oldLikes = message.embeds?.[0]?.fields?.find(f => f.name === 'Likes')?.value || '';
-        const oldComments = message.embeds?.[0]?.fields?.find(f => f.name === 'Comentarios')?.value || '';
-        if (oldLikes === String(post.likes) && oldComments === String(post.comments)) {
-          continue;
+        for (const post of posts) {
+          const permalink = post.permalink || buildInstagramPostUrl(post.shortcode);
+          const existing = fetched.find(m => (m.content && m.content.includes(permalink)) || (m.embeds && m.embeds.some(e => String(e.url || '').includes(permalink))));
+          if (existing) {
+            const arr = postedMap[post.id] || [];
+            const already = arr.some(e => e.channelId === channel.id && e.messageId === existing.id);
+            if (!already) {
+              await markPostMessage(post.id, guildId, channel.id, existing.id, permalink);
+              // refresh local postedMap
+              postedMap[post.id] = await loadPostedMessages()[post.id];
+            }
+          }
         }
-
-        await message.edit({ content: postUrl, embeds: [newEmbed], components }).catch(err => {
-          console.error('Error editando mensaje publicado:', err?.message || err);
-        });
       } catch (err) {
-        console.error('Error procesando actualización de mensaje publicado:', err?.message || err);
+        console.error('Error escaneando canal para publicaciones antiguas:', err?.message || err);
+      }
+    }
+
+    // Now update all mapped messages
+    const ids = Object.keys(postedMap || {});
+    for (const postId of ids) {
+      const post = posts.find(p => p.id === postId);
+      if (!post) continue;
+      const entries = postedMap[postId] || [];
+      for (const entry of entries) {
+        try {
+          const channel = await client.channels.fetch(entry.channelId).catch(() => null);
+          if (!channel) continue;
+          const message = await channel.messages.fetch(entry.messageId).catch(() => null);
+          if (!message) continue;
+
+          const newEmbed = createPostEmbed(post);
+          const postUrl = post.permalink || buildInstagramPostUrl(post.shortcode);
+          const components = createPostButtonRow(postUrl);
+
+          const oldLikes = message.embeds?.[0]?.fields?.find(f => f.name === 'Likes')?.value || '';
+          const oldComments = message.embeds?.[0]?.fields?.find(f => f.name === 'Comentarios')?.value || '';
+          if (oldLikes === String(post.likes) && oldComments === String(post.comments)) continue;
+
+          await message.edit({ content: postUrl, embeds: [newEmbed], components }).catch(err => {
+            console.error('Error editando mensaje publicado:', err?.message || err);
+          });
+        } catch (err) {
+          console.error('Error actualizando entrada publicada:', err?.message || err);
+        }
       }
     }
   } catch (err) {
@@ -487,15 +544,16 @@ client.on('interactionCreate', async (interaction) => {
           });
         }
 
-        DISCORD_CHANNEL_ID = channel.id;
+        // Save per-guild channel
+        CHANNELS_MAP[interaction.guildId] = channel.id;
         await saveConfig();
 
         await interaction.reply({
-          content: `✅ Canal de publicación cambiado a <#${channel.id}>`,
+          content: `✅ Canal de publicación cambiado para este servidor a <#${channel.id}>`,
           flags: MessageFlags.Ephemeral
         });
 
-        console.log(`Canal de publicación actualizado a: ${channel.id} (${channel.name})`);
+        console.log(`Canal de publicación actualizado para guild ${interaction.guildId}: ${channel.id} (${channel.name})`);
       }
 
       if (interaction.commandName === 'settiktokchannel') {
@@ -685,8 +743,9 @@ client.on('interactionCreate', async (interaction) => {
 
       if (interaction.commandName === 'status') {
         try {
-          const channel = await client.channels.fetch(DISCORD_CHANNEL_ID).catch(() => null);
-          const channelName = channel ? `<#${DISCORD_CHANNEL_ID}>` : `Desconocido (${DISCORD_CHANNEL_ID})`;
+          const configured = CHANNELS_MAP[interaction.guildId] || DISCORD_CHANNEL_ID;
+          const channel = configured ? await client.channels.fetch(configured).catch(() => null) : null;
+          const channelName = channel ? `<#${configured}>` : `Desconocido (${configured})`;
           const tiktokChannel = await client.channels.fetch(TIKTOK_CHANNEL_ID).catch(() => null);
           const tiktokChannelName = tiktokChannel ? `<#${TIKTOK_CHANNEL_ID}>` : `Desconocido (${TIKTOK_CHANNEL_ID})`;
           
@@ -864,13 +923,14 @@ client.on('interactionCreate', async (interaction) => {
             });
           }
 
-          // Publicar en el canal
-          await postToDiscord(post);
+          // Publicar en el canal configurado para este servidor
+          await postToDiscord(post, { targetGuildId: interaction.guildId });
           lastPublishedPostId = post.id;
           await saveState();
 
+          const targetCh = CHANNELS_MAP[interaction.guildId] || DISCORD_CHANNEL_ID;
           await interaction.editReply({
-            content: `✅ Publicación enviada a <#${DISCORD_CHANNEL_ID}> con éxito!`,
+            content: `✅ Publicación enviada a <#${targetCh}> con éxito!`,
             components: []
           });
 
