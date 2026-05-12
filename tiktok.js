@@ -73,6 +73,15 @@ function buildTikTokPostUrl(video) {
   return video?.shareUrl || `https://www.tiktok.com/@${username}/video/${videoId}`;
 }
 
+function pickFirstText(...values) {
+  for (const value of values) {
+    const text = String(value || '').trim();
+    if (text) return text;
+  }
+
+  return '';
+}
+
 function normalizeTikTokItem(item) {
   if (!item) return null;
 
@@ -81,10 +90,26 @@ function normalizeTikTokItem(item) {
 
   const shareUrl = item.share_url || item.shareUrl || item.url || item.video?.share_url || '';
   const createTime = item.create_time || item.createTime || item.timestamp || item.create_time_ms || null;
+  const caption = pickFirstText(
+    item.desc,
+    item.description,
+    item.text,
+    item.title,
+    item.itemInfos?.desc,
+    item.itemInfos?.text,
+    item.itemInfo?.desc,
+    item.itemInfo?.text,
+    item.aweme_info?.desc,
+    item.aweme_info?.desc_text,
+    item.awemeInfo?.desc,
+    item.awemeInfo?.desc_text,
+    item.video?.desc,
+    item.video?.title
+  );
 
   return {
     id: videoId,
-    caption: item.desc || item.description || item.text || '',
+    caption,
     takenAt: createTime ? Number(createTime) : null,
     imageUrl: item.cover_url || item.cover || item.video?.cover || item.video?.dynamic_cover || '',
     shareUrl: shareUrl || buildTikTokPostUrl({ id: videoId }),
