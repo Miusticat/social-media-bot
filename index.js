@@ -78,6 +78,29 @@ function getInstagramChannelIdForGuild(guildId) {
   return CHANNELS_MAP[guildId] || DISCORD_CHANNEL_ID;
 }
 
+function getConfiguredInstagramTargets() {
+  const targets = [];
+  const seenGuilds = new Set();
+
+  for (const guild of client.guilds.cache.values()) {
+    const channelId = CHANNELS_MAP[guild.id];
+    if (!channelId) continue;
+    targets.push({ guildId: guild.id, channelId });
+    seenGuilds.add(guild.id);
+  }
+
+  for (const [guildId, channelId] of Object.entries(CHANNELS_MAP || {})) {
+    if (seenGuilds.has(guildId) || !channelId) continue;
+    targets.push({ guildId, channelId });
+  }
+
+  if (targets.length === 0 && client.guilds.cache.size === 1 && DISCORD_CHANNEL_ID) {
+    targets.push({ guildId: null, channelId: DISCORD_CHANNEL_ID });
+  }
+
+  return targets;
+}
+
 async function savePostedMessages(map) {
   await fs.writeFile(POSTS_STATE_FILE, JSON.stringify(map, null, 2), 'utf-8');
 }
@@ -116,6 +139,19 @@ async function hasPostBeenSentToChannel(postId, channelId) {
   const map = await loadPostedMessages();
   const entries = map?.[postId] || [];
   return entries.some(entry => entry.channelId === channelId);
+}
+
+async function hasPostBeenSentToAllConfiguredChannels(postId) {
+  const targets = getConfiguredInstagramTargets();
+  if (targets.length === 0) return false;
+
+  for (const target of targets) {
+    if (!(await hasPostBeenSentToChannel(postId, target.channelId))) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 async function loadTikTokConfig() {
@@ -350,14 +386,7 @@ async function postToDiscord(post, options = {}) {
     const ch = CHANNELS_MAP[options.targetGuildId] || DISCORD_CHANNEL_ID;
     if (ch) targets.push({ guildId: options.targetGuildId, channelId: ch });
   } else {
-    const all = Object.entries(CHANNELS_MAP || {});
-    if (all.length === 0 && DISCORD_CHANNEL_ID) {
-      targets.push({ guildId: null, channelId: DISCORD_CHANNEL_ID });
-    } else {
-      for (const [guildId, channelId] of all) {
-        targets.push({ guildId, channelId });
-      }
-    }
+    targets.push(...getConfiguredInstagramTargets());
   }
 
   for (const t of targets) {
@@ -472,17 +501,16 @@ async function publishAllInstagramPosts(interaction) {
     }
 
     const orderedPosts = [...posts].reverse();
-    const channelId = getInstagramChannelIdForGuild(interaction.guildId);
     let publishedCount = 0;
     let skippedCount = 0;
 
     for (const post of orderedPosts) {
-      if (await hasPostBeenSentToChannel(post.id, channelId)) {
+      if (await hasPostBeenSentToAllConfiguredChannels(post.id)) {
         skippedCount += 1;
         continue;
       }
 
-      await postToDiscord(post, { targetGuildId: interaction.guildId });
+      await postToDiscord(post);
       publishedCount += 1;
     }
 
@@ -492,7 +520,7 @@ async function publishAllInstagramPosts(interaction) {
     }
 
     await interaction.editReply({
-      content: `✅ Instagram: publicadas ${publishedCount} publicaciones${skippedCount ? `, ${skippedCount} omitidas por duplicadas` : ''}.`
+      content: `✅ Instagram: publicadas ${publishedCount} publicaciones en los servidores configurados${skippedCount ? `, ${skippedCount} omitidas por duplicadas` : ''}.`
     });
   } catch (err) {
     console.error('Error en comando publicartodoig:', err?.message || err);
@@ -1041,13 +1069,12 @@ client.on('interactionCreate', async (interaction) => {
           }
 
           // Publicar en el canal configurado para este servidor
-          await postToDiscord(post, { targetGuildId: interaction.guildId });
+          await postToDiscord(post);
           lastPublishedPostId = post.id;
           await saveState();
 
-          const targetCh = CHANNELS_MAP[interaction.guildId] || DISCORD_CHANNEL_ID;
           await interaction.editReply({
-            content: `✅ Publicación enviada a <#${targetCh}> con éxito!`,
+            content: `✅ Publicación enviada a los servidores configurados con éxito!`,
             components: []
           });
 
