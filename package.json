@@ -1,7 +1,7 @@
 {
   "name": "social-media-gtaw-bot",
   "version": "1.0.0",
-  "description": "Bot de Discord para publicar automaticamente nuevas publicaciones de Instagram en un canal",
+  "description": "Bot de Discord para publicar automaticamente contenido de Instagram y TikTok en canales separados",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",

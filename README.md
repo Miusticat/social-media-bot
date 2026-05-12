@@ -2,6 +2,8 @@
 
 Bot de Discord para automatizar la publicación de contenido de Instagram en un canal específico, usando la Instagram API con Facebook Login y embeds nativos de Discord.
 
+También publica contenido de TikTok en un canal independiente, con selector manual para elegir qué video enviar.
+
 Este proyecto fue producido por **Miusticat** para **GTA WORLD ES** como una base sólida de automatización social media para Discord.
 
 ## Resumen
@@ -22,6 +24,7 @@ El bot monitorea el perfil de Instagram configurado, detecta nuevas publicacione
 
 - Detección automática de nuevas publicaciones por polling.
 - Publicación inmediata en Discord con embed y botón `IR A LA PUBLICACIÓN`.
+- Canal independiente para TikTok con publicación automática y comando manual de selección.
 - Lectura de `like_count` y `comments_count` desde la API oficial cuando están disponibles.
 - Persistencia local del último post publicado para evitar repeticiones.
 - Configuración por variables de entorno para facilitar despliegues.
@@ -70,9 +73,19 @@ STATE_FILE=.ig-state.json
 - `INSTAGRAM_MEDIA_API_URL`: endpoint completo de Instagram. Si no lo defines, el bot lo construye con `INSTAGRAM_ACCESS_TOKEN`.
 - `INSTAGRAM_ACCESS_TOKEN`: token de acceso para la API oficial.
 - `DISCORD_CHANNEL_ID`: canal de Discord donde se publican los posts. Usa el ID de tu propio servidor.
+- `TIKTOK_USERNAME`: nombre de usuario de TikTok a monitorizar.
+- `RAPIDAPI_KEY`: clave de RapidAPI usada para leer videos de TikTok.
+- `TIKTOK_CHANNEL_ID`: canal de Discord donde se publican los videos de TikTok. Si no lo defines, usa el canal de Instagram como fallback.
 - `CHECK_INTERVAL_MINUTES`: intervalo de revisión. Para detección rápida se recomienda `1`.
 - `POST_ON_STARTUP`: si es `true`, publica el último post al arrancar.
 - `STATE_FILE`: archivo local para guardar el último post publicado.
+
+### Comandos
+
+- `/setchannel`: cambia el canal de Instagram.
+- `/settiktokchannel`: cambia el canal de TikTok.
+- `/publicar`: selecciona una publicación de Instagram y la publica manualmente.
+- `/publicartiktok`: selecciona un video de TikTok y lo publica manualmente.
 
 ## Uso
 
@@ -84,9 +97,10 @@ npm start
 
 1. El bot arranca y carga el estado local.
 2. Consulta Instagram en el intervalo configurado.
-3. Si detecta una publicación nueva, la envía al canal de Discord.
-4. Añade un embed con preview, métricas y botón de acceso directo.
-5. Guarda el ID del último post para no duplicarlo.
+3. Consulta TikTok en su propio canal y detecta nuevos videos por separado.
+4. Si detecta una publicación nueva, la envía al canal correspondiente.
+5. Añade un embed con preview, métricas y botón de acceso directo.
+6. Guarda el ID del último post para no duplicarlo.
 
 ## Notas técnicas
 
