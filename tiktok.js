@@ -15,8 +15,7 @@ function getTikTokMediaApiUrl() {
     return process.env.TIKTOK_MEDIA_API_URL;
   }
 
-  const username = getTikTokUsername();
-  return `https://tiktok-scraper-api.p.rapidapi.com/user/posts?username=${encodeURIComponent(username)}`;
+  return 'https://tiktok-scraper7.p.rapidapi.com/user/search?keywords=tiktok&count=10&cursor=0&follower_count=0&profile_type=0&other_pref=0';
 }
 
 function getTikTokApiHeaders() {
@@ -33,7 +32,7 @@ function getTikTokApiHeaders() {
   if (process.env.TIKTOK_RAPIDAPI_HOST) {
     headers['X-RapidAPI-Host'] = process.env.TIKTOK_RAPIDAPI_HOST;
   } else {
-    headers['X-RapidAPI-Host'] = 'tiktok-scraper-api.p.rapidapi.com';
+    headers['X-RapidAPI-Host'] = 'tiktok-scraper7.p.rapidapi.com';
   }
 
   return headers;

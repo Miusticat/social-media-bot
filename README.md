@@ -74,9 +74,9 @@ STATE_FILE=.ig-state.json
 - `INSTAGRAM_ACCESS_TOKEN`: token de acceso para la API oficial.
 - `DISCORD_CHANNEL_ID`: canal de Discord donde se publican los posts. Usa el ID de tu propio servidor.
 - `TIKTOK_USERNAME`: nombre de usuario de TikTok a monitorizar.
-- `TIKTOK_MEDIA_API_URL`: endpoint completo para leer videos de TikTok. Si lo defines, se usa en lugar del endpoint por defecto.
+- `TIKTOK_MEDIA_API_URL`: endpoint completo para leer videos de TikTok. Si lo defines, se usa en lugar del endpoint por defecto (`tiktok-scraper7.p.rapidapi.com`).
 - `TIKTOK_MEDIA_API_KEY`: clave API para el endpoint configurado de TikTok.
-- `TIKTOK_RAPIDAPI_HOST`: host de RapidAPI para el endpoint configurado de TikTok.
+- `TIKTOK_RAPIDAPI_HOST`: host de RapidAPI para el endpoint configurado de TikTok. Por defecto usa `tiktok-scraper7.p.rapidapi.com`.
 - `RAPIDAPI_KEY`: clave de RapidAPI usada como fallback si no defines `TIKTOK_MEDIA_API_KEY`.
 - `TIKTOK_CHANNEL_ID`: canal de Discord donde se publican los videos de TikTok. Si no lo defines, usa el canal de Instagram como fallback.
 - `CHECK_INTERVAL_MINUTES`: intervalo de revisión. Para detección rápida se recomienda `1`.
