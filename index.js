@@ -6,7 +6,6 @@ const { Client, GatewayIntentBits, EmbedBuilder, ChannelType, REST, Routes, Slas
 
 const TOKEN = process.env.DISCORD_TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
-const GUILD_ID = process.env.GUILD_ID;
 const INSTAGRAM_USERNAME = process.env.INSTAGRAM_USERNAME || 'gtaworld_es_oficial';
 const INSTAGRAM_MEDIA_API_URL = process.env.INSTAGRAM_MEDIA_API_URL || '';
 const INSTAGRAM_ACCESS_TOKEN = process.env.INSTAGRAM_ACCESS_TOKEN || '';
@@ -26,8 +25,8 @@ if (!TOKEN) {
   process.exit(1);
 }
 
-if (!CLIENT_ID || !GUILD_ID) {
-  console.error('Faltan las variables de entorno CLIENT_ID o GUILD_ID.');
+if (!CLIENT_ID) {
+  console.error('Falta la variable de entorno CLIENT_ID.');
   process.exit(1);
 }
 
@@ -171,17 +170,17 @@ async function registerCommands() {
   const rest = new REST({ version: '10' }).setToken(TOKEN);
 
   try {
-    console.log('Iniciando la actualización de comandos (/)');
+    console.log('Iniciando la actualización global de comandos (/)');
 
-    // Registra los comandos en el servidor específico (más rápido para pruebas)
     const data = await rest.put(
-      Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID),
+      Routes.applicationCommands(CLIENT_ID),
       { body: commands }
     );
 
-    console.log(`✅ Se registraron ${data.length} comandos de aplicación en el servidor.`);
+    console.log(`✅ Se registraron ${data.length} comandos globales de aplicación.`);
+    console.log('Nota: los comandos globales pueden tardar un tiempo en propagarse a todos los servidores.');
   } catch (error) {
-    console.error('Error al registrar comandos:', error.message);
+    console.error('Error al registrar comandos globales:', error.message);
   }
 }
 

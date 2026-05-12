@@ -57,6 +57,7 @@ Define un archivo `.env` con esta estructura:
 
 ```env
 DISCORD_TOKEN=pon_aqui_tu_token
+CLIENT_ID=pon_aqui_el_client_id_del_bot
 INSTAGRAM_USERNAME=gtaworld_es_oficial
 INSTAGRAM_MEDIA_API_URL=https://graph.instagram.com/me/media?fields=id,caption,media_type,media_url,permalink,timestamp,like_count,comments_count&access_token=tu_token
 INSTAGRAM_ACCESS_TOKEN=tu_token
@@ -69,10 +70,11 @@ STATE_FILE=.ig-state.json
 ### Variables principales
 
 - `DISCORD_TOKEN`: token del bot de Discord.
+- `CLIENT_ID`: client ID de la aplicación de Discord, necesario para registrar comandos globales.
 - `INSTAGRAM_USERNAME`: nombre de usuario del perfil a monitorizar.
 - `INSTAGRAM_MEDIA_API_URL`: endpoint completo de Instagram. Si no lo defines, el bot lo construye con `INSTAGRAM_ACCESS_TOKEN`.
 - `INSTAGRAM_ACCESS_TOKEN`: token de acceso para la API oficial.
-- `DISCORD_CHANNEL_ID`: canal de Discord donde se publican los posts. Usa el ID de tu propio servidor.
+- `DISCORD_CHANNEL_ID`: canal de respaldo para Instagram. Cada servidor puede usar `/setchannel` para guardar el suyo propio.
 - `TIKTOK_USERNAME`: nombre de usuario de TikTok a monitorizar.
 - `TIKTOK_MEDIA_API_URL`: endpoint completo para leer videos de TikTok. Si lo defines, se usa en lugar del endpoint por defecto (`tiktok-scraper7.p.rapidapi.com/user/posts`).
 - `TIKTOK_MEDIA_API_KEY`: clave API para el endpoint configurado de TikTok.
@@ -106,6 +108,13 @@ npm start
 4. Si detecta una publicación nueva, la envía al canal correspondiente.
 5. Añade un embed con preview, métricas y botón de acceso directo.
 6. Guarda el ID del último post para no duplicarlo.
+
+## Modo multi-servidor
+
+- El bot registra comandos globales, así que puedes invitarlo a varios servidores con la misma app.
+- Cada servidor puede ejecutar `/setchannel` para fijar su canal de Instagram.
+- Las publicaciones manuales y automáticas usan el canal configurado en el servidor actual.
+- Las publicaciones antiguas se reescanean por permalink para seguir actualizando likes y comentarios aunque se enviaran antes de este cambio.
 
 ## Notas técnicas
 
